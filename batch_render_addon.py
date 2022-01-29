@@ -53,16 +53,28 @@ default_camera_y_pos = 0.3777
 # model types
 all_model_types = ['default'] #TODO: add 'gibs' as well
 
-# view layer presets
-all_models = ['abe_game', 'abe_game_orange', 'abe_fmv', 'mud_green_game', 'mud_green_game_orange', 'mud_green_fmv', 'mud_blind_game', 'mud_blind_fmv']
+# == VIEW LAYER PRESETS
 
-only_game = ['abe_game', 'mud_green_game', 'mud_blind_game']
-only_game_orange = ['abe_game_orange', 'mud_green_game_orange', 'mud_blind_game']
-only_fmv = ['abe_fmv', 'mud_green_fmv', 'mud_blind_fmv']
+# mudokons
+mud_all_models = ['abe_game', 'abe_game_orange', 'abe_fmv', 'mud_green_game', 'mud_green_game_orange', 'mud_green_fmv', 'mud_blind_game', 'mud_blind_fmv']
+mud_game = ['abe_game', 'mud_green_game', 'mud_blind_game']
+mud_game_orange = ['abe_game_orange', 'mud_green_game_orange', 'mud_blind_game']
+mud_fmv = ['abe_fmv', 'mud_green_fmv', 'mud_blind_fmv']
+mud_abe_game = ['abe_game']
+mud_abe_game_orange = ['abe_game_orange']
+mud_abe_fmv = ['abe_fmv']
 
-only_abe_game = ['abe_game']
-only_abe_game_orange = ['abe_game_orange']
-only_abe_fmv = ['abe_fmv']
+# sligs
+slig_all_models = ['slig_visor', 'slig_visor_tubes', 'slig_lenses', 'slig_lenses_tubes']
+
+# glukkons
+gluk_all_models = ['rf_exec_blue', 'rf_exec_brown', 'rf_exec_green', 'rf_exec_greyblue', 'rf_exec_purple', 'rf_exec_red', 'jr_exec', 'jr_exec_gib', 'aslik', 'aslik_gib', 'dripik', 'dripik_gib', 'dripik_menu']
+gluk_rf_exec_fmv_green = ['rf_exec_green']
+gluk_rf_exec_fmv_all = ['rf_exec_blue', 'rf_exec_brown', 'rf_exec_green', 'rf_exec_greyblue', 'rf_exec_purple', 'rf_exec_red']
+gluk_jr_exec_game = ['jr_exec', 'jr_exec_gib']
+gluk_aslik_fmv = ['aslik', 'aslik_gib']
+gluk_dripik_fmv = ['dripik', 'dripik_gib']
+gluk_menu_dripik = ['dripik_menu']
 
 # == GLOBAL VARIABLES
 
@@ -77,9 +89,6 @@ class ReliveBatchProperties(bpy.types.PropertyGroup):
     )
 
     render_path : bpy.props.StringProperty(name='Render Path', default='renders', description="Renders will be saved to this path")
-
-    #('add_version', bpy.props.BoolProperty(name='Bool', default=False)),
-    #('version', bpy.props.IntProperty(name='Int', default=1)),
 
     enabled_view_layers : bpy.props.BoolVectorProperty(
         name = "ViewLayers",
@@ -104,10 +113,6 @@ class ReliveBatchProperties(bpy.types.PropertyGroup):
     current_frame : bpy.props.StringProperty(name='Current frame', default='')
 
 # == UTILS
-
-#def batch_render(params):
-#    (view_layer, version, add_version) = params #TODO: update parameters
-#    print("RENDER'D!")
 
 def get_default_csv(character_type):
     if character_type == 'mud':
@@ -194,11 +199,21 @@ class ReliveSetModelsOperator(bpy.types.Operator):
 
     preset: bpy.props.EnumProperty(
         items=[
-            ('all_models', 'all_models', ''),
-            ('only_game', 'only_game', ''),
-            ('only_fmv', 'only_fmv', ''),
-            ('only_abe_game', 'only_abe_game', ''),
-            ('only_abe_fmv', 'only_abe_fmv', '')
+            ('mud_all_models', 'mud_all_models', ''),
+            ('mud_game', 'mud_game', ''),
+            ('mud_fmv', 'mud_fmv', ''),
+            ('mud_abe_game', 'mud_abe_game', ''),
+            ('mud_abe_fmv', 'mud_abe_fmv', ''),
+
+            ('slig_all_models', 'slig_all_models', ''),
+
+            ('gluk_all_models', 'gluk_all_models', ''),
+            ('gluk_rf_exec_fmv_green', 'gluk_rf_exec_fmv_green', ''),
+            ('gluk_rf_exec_fmv_all', 'gluk_rf_exec_fmv_all', ''),
+            ('gluk_jr_exec_game', 'gluk_jr_exec_game', ''),
+            ('gluk_aslik_fmv', 'gluk_aslik_fmv', ''),
+            ('gluk_dripik_fmv', 'gluk_dripik_fmv', ''),
+            ('gluk_menu_dripik', 'gluk_menu_dripik', ''),
         ]
     )
 
@@ -206,16 +221,32 @@ class ReliveSetModelsOperator(bpy.types.Operator):
         layer_bools = context.scene.reliveBatch.enabled_view_layers
         layers = context.scene.view_layers
 
-        if self.preset == 'all_models':
-            preset = all_models
-        elif self.preset == 'only_game':
-            preset = only_game
-        elif self.preset == 'only_fmv':
-            preset = only_fmv
-        elif self.preset == 'only_abe_game':
-            preset = only_abe_game
-        elif self.preset == 'only_abe_fmv':
-            preset = only_abe_fmv
+        if self.preset == 'mud_all_models':
+            preset = mud_all_models
+        elif self.preset == 'mud_game':
+            preset = mud_game
+        elif self.preset == 'mud_fmv':
+            preset = mud_fmv
+        elif self.preset == 'mud_abe_game':
+            preset = mud_abe_game
+        elif self.preset == 'mud_abe_fmv':
+            preset = mud_abe_fmv
+        elif self.preset == 'slig_all_models':
+            preset = slig_all_models
+        elif self.preset == 'gluk_all_models':
+            preset = gluk_all_models
+        elif self.preset == 'gluk_rf_exec_fmv_green':
+            preset = gluk_rf_exec_fmv_green
+        elif self.preset == 'gluk_rf_exec_fmv_all':
+            preset = gluk_rf_exec_fmv_all
+        elif self.preset == 'gluk_jr_exec_game':
+            preset = gluk_jr_exec_game
+        elif self.preset == 'gluk_aslik_fmv':
+            preset = gluk_aslik_fmv
+        elif self.preset == 'gluk_dripik_fmv':
+            preset = gluk_dripik_fmv
+        elif self.preset == 'gluk_menu_dripik':
+            preset = gluk_menu_dripik
         else:
             preset = []
 
@@ -271,12 +302,6 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
             self.finished()
     
     def execute(self, context):
-        #params = (
-        #    context.scene.render_path,
-        #    context.scene.csv_path,
-        #    context.scene.view_layer
-        #)
-
         props = context.scene.reliveBatch
 
         context.preferences.view.render_display_type = 'NONE'
@@ -455,15 +480,6 @@ class ReliveBatchRendererMainPanel(ReliveBatchRendererPanel, bpy.types.Panel):
     def draw(self, context):
         props = context.scene.reliveBatch
 
-        #layout = self.layout
-        #split = layout.split(factor=0.25)
-        #col_1 = split.column()
-        #col_2 = split.column()
-        #col_1.label(text='Add mesh')
-        #col_2.operator('mesh.primitive_cube_add', text='Cube')
-        #col_1.label(text='Word name')
-        #col_2.prop(bpy.data.worlds['World'], 'name', text='')
-
         col = self.layout.column()
 
         # Properties
@@ -493,36 +509,41 @@ class ReliveBatchRendererModelsPanel(ReliveBatchRendererPanel, bpy.types.Panel):
     bl_idname = "VIEW3D_PT_batch_renderer_models"
     bl_parent_id = "VIEW3D_PT_batch_renderer"
     bl_label = "Models"
-    #bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context):
         props = context.scene.reliveBatch
         col = self.layout.column()
 
         col.label(text="Presets:")
-        col.row().operator('opr.set_batch_view_layers', text='All models').preset = 'all_models'
-        
-        row1 = col.row()
-        row1.operator('opr.set_batch_view_layers', text='All (Game)').preset = 'only_game'
-        row1.operator('opr.set_batch_view_layers', text='All (FMV)').preset = 'only_fmv'
 
-        row2 = col.row()
-        row2.operator('opr.set_batch_view_layers', text='Abe (Game)').preset = 'only_abe_game'
-        row2.operator('opr.set_batch_view_layers', text='Abe (FMV)').preset = 'only_abe_fmv'
+        if props.character_type == 'mud':
+            col.row().operator('opr.set_batch_view_layers', text='All models').preset = 'mud_all_models'
+            
+            row1 = col.row()
+            row1.operator('opr.set_batch_view_layers', text='All (Game)').preset = 'mud_game'
+            row1.operator('opr.set_batch_view_layers', text='All (FMV)').preset = 'mud_fmv'
+
+            row2 = col.row()
+            row2.operator('opr.set_batch_view_layers', text='Abe (Game)').preset = 'mud_abe_game'
+            row2.operator('opr.set_batch_view_layers', text='Abe (FMV)').preset = 'mud_abe_fmv'
+
+        elif props.character_type == 'slig':
+            col.row().operator('opr.set_batch_view_layers', text='All models').preset = 'slig_all_models'
+
+        elif props.character_type == 'gluk':
+            col.row().operator('opr.set_batch_view_layers', text='All models').preset = 'gluk_all_models'
+
+            row1 = col.row()
+            row1.operator('opr.set_batch_view_layers', text='Jr. Exec (All)').preset = 'gluk_rf_exec_fmv_all'
+            row1.operator('opr.set_batch_view_layers', text='Jr. Exec (Game)').preset = 'gluk_jr_exec_game'
+
+            row2 = col.row()
+            row2.operator('opr.set_batch_view_layers', text='Aslik').preset = 'gluk_aslik_fmv'
+            row2.operator('opr.set_batch_view_layers', text='Dripik').preset = 'gluk_dripik_fmv'
 
         col.label(text="View Layers:")
         for i, model in enumerate(context.scene.view_layers):
             col.row().prop(props, "enabled_view_layers", index=i, text=model.name)
-
-        #bool_props = []
-        
-        # Properties
-        #for model in context.scene.view_layers:
-        #    model_bool = bpy.props.BoolProperty(name='Include ' + model.name, default=True, description="Include a batch of animations using this model (ViewLayer) when rendering")
-        #    bool_props.append(model_bool)
-        
-        #for bool in bool_props:
-        #    col.row().prop(bool)
 
 
 class ReliveBatchRendererAnimationsPanel(ReliveBatchRendererPanel, bpy.types.Panel):
@@ -551,11 +572,18 @@ class ReliveBatchRendererReferencesPanel(ReliveBatchRendererPanel, bpy.types.Pan
 
     def draw(self, context):
         props = context.scene.reliveBatch
-        col = self.layout.column()
+        #col = self.layout.column()
+        
+        layout = self.layout
+        split = layout.split(factor=0.3)
+        col_1 = split.column()
+        col_2 = split.column()
 
         # Properties
-        col.row().prop(props, "camera_name")
-        col.row().prop(props, "rig_name")
+        col_1.label(text='Camera')
+        col_2.row().prop(props, "camera_name", text='')
+        col_1.label(text='Rig')
+        col_2.row().prop(props, "rig_name", text='')
         
 
 # == MAIN ROUTINE
