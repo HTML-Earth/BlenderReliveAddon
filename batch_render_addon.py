@@ -66,7 +66,7 @@ only_abe_fmv = ['abe_fmv']
 
 # == GLOBAL VARIABLES
 
-class BatchRendererProperties(bpy.types.PropertyGroup):
+class ReliveBatchProperties(bpy.types.PropertyGroup):
 
     character_type : bpy.props.EnumProperty(
         name= "Character",
@@ -177,7 +177,7 @@ def copy_duplicate_frames(frames_to_copy):
         copyfile(src, dst)
 
 def apply_action(action):
-    bpy.context.scene.objects[bpy.context.scene.batchRenderer.rig_name].animation_data.action = action
+    bpy.context.scene.objects[bpy.context.scene.reliveBatch.rig_name].animation_data.action = action
 
 def calculate_cam_scale(width, height):
     return 0.0175 * height
@@ -187,7 +187,7 @@ def calculate_cam_y(width, height):
 
 # == OPERATORS
 
-class SetModelsOperator(bpy.types.Operator):
+class ReliveSetModelsOperator(bpy.types.Operator):
     
     bl_idname = 'opr.set_batch_view_layers'
     bl_label = 'Batch Renderer View Layer Setter-Upper'
@@ -203,7 +203,7 @@ class SetModelsOperator(bpy.types.Operator):
     )
 
     def execute(self, context):
-        layer_bools = context.scene.batchRenderer.enabled_view_layers
+        layer_bools = context.scene.reliveBatch.enabled_view_layers
         layers = context.scene.view_layers
 
         if self.preset == 'all_models':
@@ -227,18 +227,18 @@ class SetModelsOperator(bpy.types.Operator):
 
         return {"FINISHED"}
 
-class BatchCancelOperator(bpy.types.Operator):
+class ReliveBatchCancelOperator(bpy.types.Operator):
     
     bl_idname = 'opr.batch_cancel_operator'
     bl_label = 'Batch Renderer Canceller'
 
     def execute(self, context):
         print("Cancelling...")
-        context.scene.batchRenderer.batch_render_status = 'CANCELLING...'
-        context.scene.batchRenderer.render_cancelled = True
+        context.scene.reliveBatch.batch_render_status = 'CANCELLING...'
+        context.scene.reliveBatch.render_cancelled = True
         return {"FINISHED"}
 
-class BatchRendererOperator(bpy.types.Operator):
+class ReliveBatchRenderOperator(bpy.types.Operator):
     
     bl_idname = 'opr.batch_renderer_operator'
     bl_label = 'Batch Renderer'
@@ -260,7 +260,7 @@ class BatchRendererOperator(bpy.types.Operator):
 
     def pre(self, *args, **kwargs):
         self.rendering_frame = True
-        bpy.context.scene.batchRenderer.batch_render_status = 'RENDERING... ' + str(self.full_frame_count - len(self.frames_to_render)) + "/" + str(self.full_frame_count)
+        bpy.context.scene.reliveBatch.batch_render_status = 'RENDERING... ' + str(self.full_frame_count - len(self.frames_to_render)) + "/" + str(self.full_frame_count)
 
     def post(self, *args, **kwargs):
         self.frames_to_render.pop(0)
@@ -277,7 +277,7 @@ class BatchRendererOperator(bpy.types.Operator):
         #    context.scene.view_layer
         #)
 
-        props = context.scene.batchRenderer
+        props = context.scene.reliveBatch
 
         context.preferences.view.render_display_type = 'NONE'
 
@@ -359,7 +359,7 @@ class BatchRendererOperator(bpy.types.Operator):
                                   # and will start the render if available
 
             # If cancelled or no more frames to render, finish.
-            if True in (not self.frames_to_render, context.scene.batchRenderer.render_cancelled is True):
+            if True in (not self.frames_to_render, context.scene.reliveBatch.render_cancelled is True):
 
                 # We remove the handlers and the modal timer to clean everything
                 bpy.app.handlers.render_pre.remove(self.pre)
@@ -376,9 +376,9 @@ class BatchRendererOperator(bpy.types.Operator):
                 # retrieve frame data
                 frame = self.frames_to_render[0]
 
-                sc.batchRenderer.current_model = frame.model
-                sc.batchRenderer.current_anim = frame.action.name
-                sc.batchRenderer.current_frame = str(frame.action_frame)
+                sc.reliveBatch.current_model = frame.model
+                sc.reliveBatch.current_anim = frame.action.name
+                sc.reliveBatch.current_frame = str(frame.action_frame)
                 
                 # Apply action
                 apply_action(frame.action)
@@ -391,8 +391,8 @@ class BatchRendererOperator(bpy.types.Operator):
                 sc.render.resolution_y = frame.height
                 
                 # Setup camera position and scale
-                bpy.data.cameras[sc.batchRenderer.camera_name].ortho_scale = calculate_cam_scale(frame.width, frame.height)
-                bpy.data.cameras[sc.batchRenderer.camera_name].shift_y     = calculate_cam_y    (frame.width, frame.height)
+                bpy.data.cameras[sc.reliveBatch.camera_name].ortho_scale = calculate_cam_scale(frame.width, frame.height)
+                bpy.data.cameras[sc.reliveBatch.camera_name].shift_y     = calculate_cam_y    (frame.width, frame.height)
 
                 # Set file path
                 sc.render.filepath = '//{}'.format(frame.file_path)
@@ -404,7 +404,7 @@ class BatchRendererOperator(bpy.types.Operator):
 
     def finished(self):
         scene = bpy.context.scene
-        props = scene.batchRenderer
+        props = scene.reliveBatch
 
         props.batch_render_status = 'COPYING DUPLICATE FRAMES...'
         # COPY DUPLICATE FRAMES
@@ -442,18 +442,18 @@ class BatchRendererOperator(bpy.types.Operator):
 
 # == PANELS
 
-class BatchRendererPanel:
+class ReliveBatchRendererPanel:
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "RELIVE"
 
 
-class BatchRendererMainPanel(BatchRendererPanel, bpy.types.Panel):
+class ReliveBatchRendererMainPanel(ReliveBatchRendererPanel, bpy.types.Panel):
     bl_idname = "VIEW3D_PT_batch_renderer"
     bl_label = "Batch Renderer for RELIVE"
 
     def draw(self, context):
-        props = context.scene.batchRenderer
+        props = context.scene.reliveBatch
 
         #layout = self.layout
         #split = layout.split(factor=0.25)
@@ -489,14 +489,14 @@ class BatchRendererMainPanel(BatchRendererPanel, bpy.types.Panel):
             col.label(text="Anim: " + props.current_anim)
             col.label(text="Frame: " + props.current_frame)
 
-class BatchRendererModelsPanel(BatchRendererPanel, bpy.types.Panel):
+class ReliveBatchRendererModelsPanel(ReliveBatchRendererPanel, bpy.types.Panel):
     bl_idname = "VIEW3D_PT_batch_renderer_models"
     bl_parent_id = "VIEW3D_PT_batch_renderer"
     bl_label = "Models"
     #bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context):
-        props = context.scene.batchRenderer
+        props = context.scene.reliveBatch
         col = self.layout.column()
 
         col.label(text="Presets:")
@@ -525,31 +525,32 @@ class BatchRendererModelsPanel(BatchRendererPanel, bpy.types.Panel):
         #    col.row().prop(bool)
 
 
-class BatchRendererAnimationsPanel(BatchRendererPanel, bpy.types.Panel):
+class ReliveBatchRendererAnimationsPanel(ReliveBatchRendererPanel, bpy.types.Panel):
     bl_idname = "VIEW3D_PT_batch_renderer_animations"
     bl_parent_id = "VIEW3D_PT_batch_renderer"
     bl_label = "Animations"
     bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context):
-        props = context.scene.batchRenderer
+        props = context.scene.reliveBatch
         col = self.layout.column()
 
         # Properties
         col.row().prop(props, "use_custom_csv")
+        col.row().label(text="CSV File:")
         if props.use_custom_csv:
-            col.row().prop(props, "custom_csv_path")
+            col.row().prop(props, "custom_csv_path", text='')
         else:
-            col.row().label(text="CSV File: " + get_default_csv(props.character_type))
+            col.row().label(text=get_default_csv(props.character_type))
 
-class BatchRendererReferencesPanel(BatchRendererPanel, bpy.types.Panel):
+class ReliveBatchRendererReferencesPanel(ReliveBatchRendererPanel, bpy.types.Panel):
     bl_idname = "VIEW3D_PT_batch_renderer_references"
     bl_parent_id = "VIEW3D_PT_batch_renderer"
     bl_label = "References"
     bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context):
-        props = context.scene.batchRenderer
+        props = context.scene.reliveBatch
         col = self.layout.column()
 
         # Properties
@@ -560,37 +561,29 @@ class BatchRendererReferencesPanel(BatchRendererPanel, bpy.types.Panel):
 # == MAIN ROUTINE
 
 CLASSES = [
-    BatchRendererProperties,
+    ReliveBatchProperties,
     
-    SetModelsOperator,
-    BatchRendererOperator,
-    BatchCancelOperator,
+    ReliveSetModelsOperator,
+    ReliveBatchRenderOperator,
+    ReliveBatchCancelOperator,
 
-    BatchRendererMainPanel,
-    BatchRendererModelsPanel,
-    BatchRendererAnimationsPanel,
-    BatchRendererReferencesPanel,
+    ReliveBatchRendererMainPanel,
+    ReliveBatchRendererModelsPanel,
+    ReliveBatchRendererAnimationsPanel,
+    ReliveBatchRendererReferencesPanel,
 ]
 
 def register():
-    for flokk in CLASSES:
-        bpy.utils.register_class(flokk)
+    for c in CLASSES:
+        bpy.utils.register_class(c)
 
-    setattr(bpy.types.Scene, "batchRenderer", bpy.props.PointerProperty(type=BatchRendererProperties))
-    #bpy.types.Scene.batchRenderer = bpy.props.PointerProperty(type=BatchRendererProperties)
-
-    #for (prop_name, prop_value) in itertools.chain(PUBLIC_PROPS, PROPS_REFS, PROPS_PRIVATE):
-    #    setattr(bpy.types.Scene, prop_name, prop_value)
+    setattr(bpy.types.Scene, "reliveBatch", bpy.props.PointerProperty(type=ReliveBatchProperties))
 
 def unregister():
-    for flokk in CLASSES:
-        bpy.utils.unregister_class(flokk)
+    for c in CLASSES:
+        bpy.utils.unregister_class(c)
 
-    delattr(bpy.types.Scene, "batchRenderer")
-    #del bpy.types.Scene.batchRenderer
-
-    #for (prop_name, _) in itertools.chain(PUBLIC_PROPS, PROPS_REFS, PROPS_PRIVATE):
-    #    delattr(bpy.types.Scene, prop_name)
+    delattr(bpy.types.Scene, "reliveBatch")
 
 if __name__ == '__main__':
     register()
