@@ -43,8 +43,6 @@ RenderFrame = namedtuple('RenderFrame', 'anim_id frame_index width height action
 
 # == CONSTANTS
 
-previous_render_display_type = bpy.context.preferences.view.render_display_type
-
 default_resolution_x = 137
 default_resolution_y = 180
 default_camera_scale = 3.15
@@ -53,9 +51,7 @@ default_camera_y_pos = 0.3777
 # model types
 all_model_types = ['default'] #TODO: add 'gibs' as well
 
-# == VIEW LAYER PRESETS
-
-# mudokons
+# mudokon view layers
 mud_all_models = ['abe_game', 'abe_game_orange', 'abe_fmv', 'mud_green_game', 'mud_green_game_orange', 'mud_green_fmv', 'mud_blind_game', 'mud_blind_fmv']
 mud_game = ['abe_game', 'mud_green_game', 'mud_blind_game']
 mud_game_orange = ['abe_game_orange', 'mud_green_game_orange', 'mud_blind_game']
@@ -64,10 +60,10 @@ mud_abe_game = ['abe_game']
 mud_abe_game_orange = ['abe_game_orange']
 mud_abe_fmv = ['abe_fmv']
 
-# sligs
+# slig view layers
 slig_all_models = ['slig_visor', 'slig_visor_tubes', 'slig_lenses', 'slig_lenses_tubes']
 
-# glukkons
+# gluk view layers
 gluk_all_models = ['rf_exec_blue', 'rf_exec_brown', 'rf_exec_green', 'rf_exec_greyblue', 'rf_exec_purple', 'rf_exec_red', 'jr_exec', 'jr_exec_gib', 'aslik', 'aslik_gib', 'dripik', 'dripik_gib', 'dripik_menu']
 gluk_rf_exec_fmv_green = ['rf_exec_green']
 gluk_rf_exec_fmv_all = ['rf_exec_blue', 'rf_exec_brown', 'rf_exec_green', 'rf_exec_greyblue', 'rf_exec_purple', 'rf_exec_red']
@@ -98,7 +94,7 @@ class ReliveBatchProperties(bpy.types.PropertyGroup):
 
     # CSV
     use_custom_csv : bpy.props.BoolProperty(name='Use custom CSV', default=False, description="Instead of using the default CSV file for the selected character, use a custom path")
-    custom_csv_path : bpy.props.StringProperty(name='CSV File', default='abe_animlist_debug.csv', description="Path to CSV file containing animation info")
+    custom_csv_path : bpy.props.StringProperty(name='CSV File', default='debug.csv', description="Path to CSV file containing animation info")
 
     # REFS
     camera_name : bpy.props.StringProperty(name='Camera', default='Camera', description="The name of the main camera used to render")
@@ -365,6 +361,9 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
         # save old render path
         self.previous_render_path = context.scene.render.filepath
 
+        # save old render display setting
+        self.previous_render_display_type = bpy.context.preferences.view.render_display_type
+
         # save old action
         self.previous_action = context.scene.objects[props.rig_name].animation_data.action
 
@@ -423,7 +422,7 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
                 sc.render.filepath = '//{}'.format(frame.file_path)
 
                 # Render frame
-                bpy.ops.render.render("INVOKE_DEFAULT", layer=frame.model, write_still=True)
+                bpy.ops.render.render(layer=frame.model, write_still=True)
 
         return {"PASS_THROUGH"}
 
@@ -453,7 +452,8 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
         bpy.data.cameras[props.camera_name].ortho_scale = default_camera_scale
         bpy.data.cameras[props.camera_name].shift_y     = default_camera_y_pos
 
-        bpy.context.preferences.view.render_display_type = previous_render_display_type
+        # RESET RENDER DISPLAY SETTING
+        bpy.context.preferences.view.render_display_type = self.previous_render_display_type
         
         props.current_model = ""
         props.current_anim = ""
