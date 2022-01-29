@@ -43,6 +43,17 @@ RenderFrame = namedtuple('RenderFrame', 'anim_id frame_index width height action
 
 # == CONSTANTS
 
+# strings
+msg_ready = 'READY'
+msg_preparing_render = 'PREPARING TO RENDER...'
+msg_rendering = 'RENDERING... {}/{}'
+msg_copying_duplicates = 'COPYING DUPLICATE FRAMES...'
+msg_done = 'DONE'
+msg_cancelling = 'CANCELLING...'
+msg_cancelled = 'CANCELLED'
+msg_check_settings = 'CHECK SETTINGS'
+error_no_csv = 'CSV FILE NOT FOUND'
+
 default_resolution_x = 137
 default_resolution_y = 180
 default_camera_scale = 3.15
@@ -84,7 +95,7 @@ class ReliveBatchProperties(bpy.types.PropertyGroup):
         ]
     )
 
-    render_path : bpy.props.StringProperty(name='Render Path', default='renders', description="Renders will be saved to this path")
+    render_path : bpy.props.StringProperty(name='Render Path', default='renders', description="Renders will be saved to this path (relative to .blend file)")
 
     enabled_view_layers : bpy.props.BoolVectorProperty(
         name = "ViewLayers",
@@ -101,7 +112,7 @@ class ReliveBatchProperties(bpy.types.PropertyGroup):
     rig_name : bpy.props.StringProperty(name='Rig', default='rig', description="The name of the main character rig")
 
     # PRIVATE
-    batch_render_status : bpy.props.StringProperty(name='Current status of batch renderer', default='READY')
+    batch_render_status : bpy.props.StringProperty(name='Current status of batch renderer', default=msg_ready)
     is_batch_rendering : bpy.props.BoolProperty(name='Batch rendering is in progress', default=False)
     render_cancelled : bpy.props.BoolProperty(name='Batch render is being cancelled', default=False)
     current_model : bpy.props.StringProperty(name='Current model', default='')
@@ -156,7 +167,7 @@ def get_models(view_layers, enabled_view_layers):
 
 def get_action(action_name):
     # Check all available actions
-    for action in  bpy.data.actions:
+    for action in bpy.data.actions:
         # Check if action has correct name
         if action.name == action_name:
             return action
@@ -180,11 +191,49 @@ def copy_duplicate_frames(frames_to_copy):
 def apply_action(action):
     bpy.context.scene.objects[bpy.context.scene.reliveBatch.rig_name].animation_data.action = action
 
-def calculate_cam_scale(width, height):
-    return 0.0175 * height
+def calculate_cam_scale(width, height, character_type):
+    if character_type == 'mud':
+        return 0.0175 * height
+
+    elif character_type == 'slig':
+        if width > height:
+            return 0.011 * width # cursed numbers
+        else:
+            return 0.01032 * height # whyyyy
+
+    elif character_type == 'gluk':
+        if height == 254:
+            return 0.013244 * height
+        else:
+            return 0.01682 * height
+
+    else:
+        return 1
     
-def calculate_cam_y(width, height):
-    return 0.5 - (22 / height)
+def calculate_cam_y(width, height, character_type):
+    if character_type == 'mud':
+        return 0.5 - (22 / height)
+
+    elif character_type == 'slig':
+        if width > height:
+            return 22 / height # why does this work?
+        else:
+            return 0.5 - (22 / height)
+
+    elif character_type == 'gluk':
+        if height == 254:
+            return 0.5 - (57 / height)
+    
+        if height == 140:
+            return 0.5 - (22 / height)
+        
+        if height == 120:
+            return 0.5 - (25 / height)
+        
+        return 0.5 - (45 / height)
+
+    else:
+        return 1
 
 # == OPERATORS
 
@@ -261,7 +310,7 @@ class ReliveBatchCancelOperator(bpy.types.Operator):
 
     def execute(self, context):
         print("Cancelling...")
-        context.scene.reliveBatch.batch_render_status = 'CANCELLING...'
+        context.scene.reliveBatch.batch_render_status = msg_cancelling
         context.scene.reliveBatch.render_cancelled = True
         return {"FINISHED"}
 
@@ -280,30 +329,36 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
     
     rendering_frame = False
     
-    #def cancelled(self, *args, **kwargs):
-    #    self.render_cancelled = True
-    #    print("CANCELLED")
-    #    self.finished()
-
     def pre(self, *args, **kwargs):
         self.rendering_frame = True
-        bpy.context.scene.reliveBatch.batch_render_status = 'RENDERING... ' + str(self.full_frame_count - len(self.frames_to_render)) + "/" + str(self.full_frame_count)
+        bpy.context.scene.reliveBatch.batch_render_status = msg_rendering.format(str(self.full_frame_count - len(self.frames_to_render)), str(self.full_frame_count))
 
     def post(self, *args, **kwargs):
         self.frames_to_render.pop(0)
         self.rendering_frame = False
-        
-        if len(self.frames_to_render) < 1:
-            print("DONE")
-            self.finished()
     
     def execute(self, context):
         props = context.scene.reliveBatch
 
-        context.preferences.view.render_display_type = 'NONE'
-
         props.is_batch_rendering = True
-        props.batch_render_status = 'PREPARING TO RENDER...'
+        props.batch_render_status = msg_preparing_render
+
+        # save old resolution
+        self.previous_resolution_x = context.scene.render.resolution_x
+        self.previous_resolution_y = context.scene.render.resolution_y
+        
+        # save old camera settings
+        self.previous_camera_scale = bpy.data.cameras[props.camera_name].ortho_scale
+        self.previous_camera_y_pos = bpy.data.cameras[props.camera_name].shift_y
+
+        # save old render path
+        self.previous_render_path = context.scene.render.filepath
+
+        # save old render display setting
+        self.previous_render_display_type = context.preferences.view.render_display_type
+
+        # save old action
+        self.previous_action = context.scene.objects[props.rig_name].animation_data.action
 
         # Get CSV path
         if props.use_custom_csv:
@@ -311,65 +366,63 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
         else:
             csv_path = get_default_csv(props.character_type)
         
-        # Gather all frames from csv into collection
-        with open(csv_path) as csvfile:
-            rdr = csv.reader(csvfile)
-            for i, row in enumerate( rdr ):
-                if i == 0:
-                    continue
-                
-                # create AnimInfo from current row
-                anim = AnimInfo(row[0], row[1], int(row[2]), int(row[3]), row[4])
-                
-                # check if model type is available
-                if not check_model_type(anim.model_type):
-                    print('Model type: {} not available'.format(anim.model_type))
-                    continue
-                
-                # parse frame string to get list of frames
-                frame_list = get_frame_list(anim.frame_string)
+        try:
+            # Gather all frames from csv into collection
+            with open(csv_path) as csvfile:
+                rdr = csv.reader(csvfile)
+                for i, row in enumerate( rdr ):
+                    if i == 0:
+                        continue
+                    
+                    # create AnimInfo from current row
+                    anim = AnimInfo(row[0], row[1], int(row[2]), int(row[3]), row[4])
+                    
+                    # check if model type is available
+                    if not check_model_type(anim.model_type):
+                        print('Model type: {} not available'.format(anim.model_type))
+                        continue
+                    
+                    # parse frame string to get list of frames
+                    frame_list = get_frame_list(anim.frame_string)
 
-                # for each enabled view layer (model)
-                for model in get_models(context.scene.view_layers, props.enabled_view_layers):
-                    # for each frame in frame list
-                    for frame_info in frame_list:
-                        # get action handle from action name
-                        action = get_action(frame_info.action_name)
-                        # if action is not null
-                        if not action == None:
-                            # assume that the frame is unique
-                            unique = True
+                    # for each enabled view layer (model)
+                    for model in get_models(context.scene.view_layers, props.enabled_view_layers):
+                        # for each frame in frame list
+                        for frame_info in frame_list:
+                            # get action handle from action name
+                            action = get_action(frame_info.action_name)
+                            # if action is not null
+                            if not action == None:
+                                # assume that the frame is unique
+                                unique = True
 
-                            # make relative path string
-                            file_path = Path('{}/{}/{}/{}_{}'.format(props.render_path, model, anim.id.split('_')[0], anim.id, frame_info.index))
+                                # make relative path string
+                                file_path = Path('{}/{}/{}/{}_{}'.format(props.render_path, model, anim.id.split('_')[0], anim.id, frame_info.index))
 
-                            for prev_frame in self.frames_to_render:
-                                # if frame already in self.frames_to_render
-                                if prev_frame.action == action and prev_frame.action_frame == frame_info.action_frame and prev_frame.model == model and prev_frame.width == anim.width and prev_frame.height == anim.height:
-                                    # frame is no longer considered unique
-                                    unique = False
-                                    # add frame to frames_to_copy instead
-                                    self.frames_to_copy.append((prev_frame.file_path, file_path))
-                                    print('{} will be copied to {}'.format(prev_frame.file_path, file_path))
-                                    break
+                                for prev_frame in self.frames_to_render:
+                                    # if frame already in self.frames_to_render
+                                    if prev_frame.action == action and prev_frame.action_frame == frame_info.action_frame and prev_frame.model == model and prev_frame.width == anim.width and prev_frame.height == anim.height:
+                                        # frame is no longer considered unique
+                                        unique = False
+                                        # add frame to frames_to_copy instead
+                                        self.frames_to_copy.append((prev_frame.file_path, file_path))
+                                        print('{} will be copied to {}'.format(prev_frame.file_path, file_path))
+                                        break
 
-                            if unique:
-                                # Add frame to frames_to_render
-                                self.frames_to_render.append(RenderFrame(anim.id, frame_info.index, anim.width, anim.height, action, frame_info.action_frame, model, file_path))
-                                self.full_frame_count += 1
+                                if unique:
+                                    # Add frame to frames_to_render
+                                    self.frames_to_render.append(RenderFrame(anim.id, frame_info.index, anim.width, anim.height, action, frame_info.action_frame, model, file_path))
+                                    self.full_frame_count += 1
+        except EnvironmentError: # parent of IOError, OSError *and* WindowsError where available
+            self.report({"ERROR"}, error_no_csv)
+            self.finished(error_no_csv)
+            return {"CANCELLED"}
 
-        # save old render path
-        self.previous_render_path = context.scene.render.filepath
-
-        # save old render display setting
-        self.previous_render_display_type = bpy.context.preferences.view.render_display_type
-
-        # save old action
-        self.previous_action = context.scene.objects[props.rig_name].animation_data.action
+        # set render display setting to avoid window popups for each render
+        context.preferences.view.render_display_type = 'NONE'
 
         bpy.app.handlers.render_pre.append(self.pre)
         bpy.app.handlers.render_post.append(self.post)
-        #bpy.app.handlers.render_cancel.append(self.cancelled)
 
         # The timer gets created and the modal handler
         # is added to the window manager
@@ -390,19 +443,20 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
                 bpy.app.handlers.render_post.remove(self.post)
                 #bpy.app.handlers.render_cancel.remove(self.cancelled)
                 context.window_manager.event_timer_remove(self._timer)
-                self.finished()
-                return {"FINISHED"}
+                self.finished('CANCELLED' if context.scene.reliveBatch.render_cancelled else 'DONE')
+                return {"CANCELLED" if context.scene.reliveBatch.render_cancelled else "FINISHED"}
 
             elif self.rendering_frame is False: # Nothing is currently rendering.
                                           # Proceed to render.
                 sc = context.scene
+                props = sc.reliveBatch
                 
                 # retrieve frame data
                 frame = self.frames_to_render[0]
 
-                sc.reliveBatch.current_model = frame.model
-                sc.reliveBatch.current_anim = frame.action.name
-                sc.reliveBatch.current_frame = str(frame.action_frame)
+                props.current_model = frame.model
+                props.current_anim = frame.action.name
+                props.current_frame = str(frame.action_frame)
                 
                 # Apply action
                 apply_action(frame.action)
@@ -415,8 +469,8 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
                 sc.render.resolution_y = frame.height
                 
                 # Setup camera position and scale
-                bpy.data.cameras[sc.reliveBatch.camera_name].ortho_scale = calculate_cam_scale(frame.width, frame.height)
-                bpy.data.cameras[sc.reliveBatch.camera_name].shift_y     = calculate_cam_y    (frame.width, frame.height)
+                bpy.data.cameras[props.camera_name].ortho_scale = calculate_cam_scale(frame.width, frame.height, props.character_type)
+                bpy.data.cameras[props.camera_name].shift_y     = calculate_cam_y    (frame.width, frame.height, props.character_type)
 
                 # Set file path
                 sc.render.filepath = '//{}'.format(frame.file_path)
@@ -426,13 +480,19 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
 
         return {"PASS_THROUGH"}
 
-    def finished(self):
+    def finished(self, status):
         scene = bpy.context.scene
         props = scene.reliveBatch
 
-        props.batch_render_status = 'COPYING DUPLICATE FRAMES...'
-        # COPY DUPLICATE FRAMES
-        copy_duplicate_frames(self.frames_to_copy)
+        if not props.render_cancelled:
+            # COPY DUPLICATE FRAMES
+            props.batch_render_status = msg_copying_duplicates
+            copy_duplicate_frames(self.frames_to_copy)
+
+        # RESET FRAME VARIABLES
+        self.frames_to_render = []
+        self.frames_to_copy = []
+        self.full_frame_count = 0
         
         # RESET FILEPATH
         scene.render.filepath = self.previous_render_path
@@ -442,15 +502,15 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
         
         # RESET FRAME 
         # causes crash :(
-        #bpy.context.scene.frame_set(0)
+        #scene.frame_set(0)
         
         # RESET RESOLUTION
-        scene.render.resolution_x = default_resolution_x
-        scene.render.resolution_y = default_resolution_y
+        scene.render.resolution_x = self.previous_resolution_x
+        scene.render.resolution_y = self.previous_resolution_y
         
         # RESET CAMERA
-        bpy.data.cameras[props.camera_name].ortho_scale = default_camera_scale
-        bpy.data.cameras[props.camera_name].shift_y     = default_camera_y_pos
+        bpy.data.cameras[props.camera_name].ortho_scale = self.previous_camera_scale
+        bpy.data.cameras[props.camera_name].shift_y     = self.previous_camera_y_pos
 
         # RESET RENDER DISPLAY SETTING
         bpy.context.preferences.view.render_display_type = self.previous_render_display_type
@@ -461,7 +521,7 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
         
         props.is_batch_rendering = False
         props.render_cancelled = False
-        props.batch_render_status = 'DONE'
+        props.batch_render_status = status
 
         self.rendering_frame = False
 
@@ -471,7 +531,6 @@ class ReliveBatchRendererPanel:
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "RELIVE"
-
 
 class ReliveBatchRendererMainPanel(ReliveBatchRendererPanel, bpy.types.Panel):
     bl_idname = "VIEW3D_PT_batch_renderer"
@@ -544,7 +603,6 @@ class ReliveBatchRendererModelsPanel(ReliveBatchRendererPanel, bpy.types.Panel):
         col.label(text="View Layers:")
         for i, model in enumerate(context.scene.view_layers):
             col.row().prop(props, "enabled_view_layers", index=i, text=model.name)
-
 
 class ReliveBatchRendererAnimationsPanel(ReliveBatchRendererPanel, bpy.types.Panel):
     bl_idname = "VIEW3D_PT_batch_renderer_animations"
