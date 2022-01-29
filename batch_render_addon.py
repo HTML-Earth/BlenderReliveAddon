@@ -324,6 +324,8 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
     frames_to_render = []
     frames_to_copy = []
 
+    missing_actions = []
+
     _timer = None
     _timer_interval = 0.1
     
@@ -387,12 +389,21 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
 
                     # for each enabled view layer (model)
                     for model in get_models(context.scene.view_layers, props.enabled_view_layers):
+
                         # for each frame in frame list
                         for frame_info in frame_list:
+
+                            # if action is in missing action list, skip it
+                            if frame_info.action_name in self.missing_actions:
+                                continue
+
                             # get action handle from action name
                             action = get_action(frame_info.action_name)
-                            # if action is not null
-                            if not action == None:
+                            # if action is missing, add to list of missing actions
+                            if action == None:
+                                self.missing_actions.append(frame_info.action_name)
+                            # if action exists
+                            else:
                                 # assume that the frame is unique
                                 unique = True
 
@@ -413,6 +424,7 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
                                     # Add frame to frames_to_render
                                     self.frames_to_render.append(RenderFrame(anim.id, frame_info.index, anim.width, anim.height, action, frame_info.action_frame, model, file_path))
                                     self.full_frame_count += 1
+                                    
         except EnvironmentError: # parent of IOError, OSError *and* WindowsError where available
             self.report({"ERROR"}, error_no_csv)
             self.finished(error_no_csv)
@@ -493,6 +505,8 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
         self.frames_to_render = []
         self.frames_to_copy = []
         self.full_frame_count = 0
+
+        self.missing_actions = []
         
         # RESET FILEPATH
         scene.render.filepath = self.previous_render_path
