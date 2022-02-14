@@ -9,12 +9,15 @@ bl_info = {
     'description': 'A tool to render HD sprites for RELIVE',
 }
 
-import bpy, os, csv, itertools
+import bpy, os, json, fnmatch, itertools, csv
 from pathlib import Path
 from shutil import copyfile
 from collections import namedtuple
 
 # == CUSTOM DATATYPES
+
+# Animation from new asset tool
+NewAnim = namedtuple('NewAnim', 'name frame_count size_w size_h offset_x offset_y')
 
 # Animation info collected from each row in csv file
 AnimInfo = namedtuple('AnimInfo', 'id frame_string width height model_type')
@@ -95,7 +98,10 @@ class ReliveBatchProperties(bpy.types.PropertyGroup):
         ]
     )
 
+    # FILE PATHS
     render_path : bpy.props.StringProperty(name='Render Path', default='renders', description="Renders will be saved to this path (relative to .blend file)")
+    ref_sprite_path : bpy.props.StringProperty(name='Reference Sprites Path', default='sprites', description="Sprites will be loaded from this path (relative to .blend file)")
+    ref_sprite_filter : bpy.props.StringProperty(name='Reference Sprite filter', default='Mudokon*', description="Only animations that match the filter will be imported")
 
     enabled_view_layers : bpy.props.BoolVectorProperty(
         name = "ViewLayers",
@@ -107,7 +113,7 @@ class ReliveBatchProperties(bpy.types.PropertyGroup):
     use_custom_csv : bpy.props.BoolProperty(name='Use custom CSV', default=False, description="Instead of using the default CSV file for the selected character, use a custom path")
     custom_csv_path : bpy.props.StringProperty(name='CSV File', default='debug.csv', description="Path to CSV file containing animation info")
 
-    # REFS
+    # SCENE REFS
     camera_name : bpy.props.StringProperty(name='Camera', default='Camera', description="The name of the main camera used to render")
     rig_name : bpy.props.StringProperty(name='Rig', default='rig', description="The name of the main character rig")
 
@@ -135,6 +141,33 @@ def check_model_type(model_type):
     if model_type in all_model_types:
         return True
     return False
+
+def get_anims(sprite_folder, filter):
+    anim_folders = [f for f in Path(sprite_folder).iterdir() if f.is_dir()]
+    anims = []
+    for folder in anim_folders:
+        if not fnmatch.fnmatch(folder.name, filter):
+            continue
+
+        json_file = folder / 'meta.json'
+        if not Path.exists(json_file):
+            continue
+
+        with open(json_file) as f:
+            data = json.load(f)
+
+            frame_count = data['frame_count']
+            size_w = data['size']['w']
+            size_h = data['size']['h']
+            offset_x = data['offset']['x']
+            offset_y = data['offset']['y']
+
+            if frame_count < 1:
+                continue
+
+            anims.append(NewAnim(folder.name, frame_count, size_w, size_h, offset_x, offset_y))
+
+    return anims
 
 # Parses string and returns list of FrameInfos
 def get_frame_list(frame_string):
@@ -236,6 +269,69 @@ def calculate_cam_y(width, height, character_type):
         return 1
 
 # == OPERATORS
+
+class ReliveImportReferencesOperator(bpy.types.Operator):
+    
+    bl_idname = 'opr.import_reference_sprites_operator'
+    bl_label = 'Reference Sprite Importer'
+
+    def execute(self, context):
+        props = context.scene.reliveBatch
+
+        print("Importing reference sprites...")
+
+        newAnims = get_anims(props.ref_sprite_path, props.ref_sprite_filter)
+        #newAnims.append(NewAnim("Mudokon_Chant", 10, 81, 136, 31, 118))
+        #newAnims.append(NewAnim("Mudokon_ChantEnd", 3, 76, 136, 31, 118))
+
+        # Create ref collections
+        referencesCollection = bpy.data.collections.new("References (" + props.ref_sprite_filter + ")")
+        bpy.context.scene.collection.children.link(referencesCollection)
+        referencesCollection.color_tag = 'COLOR_01'
+        referencesCollection.hide_select = True
+
+        # Add all reference image sequences
+        for newAnim in newAnims:
+            # load image and set to sequence
+            img = bpy.data.images.load("//" + props.ref_sprite_path + "/" + newAnim.name + "/0.png")
+            img.name = newAnim.name
+            img.source = 'SEQUENCE'
+
+            # create new empty
+            empty = bpy.data.objects.new(newAnim.name, None)
+
+            # set empty to use image sequence
+            empty.empty_display_type = 'IMAGE'
+            empty.data = img
+            
+            # set sequence frames
+            #   for some reason the frame count starts at 0
+            #   and the first frame starts at 1... Blender pls
+            empty.image_user.frame_duration = newAnim.frame_count - 1
+            empty.image_user.frame_start = 1
+
+            # enable alpha
+            empty.use_empty_image_alpha = True
+
+            # set size depending on aspect ratio
+            if newAnim.size_w > newAnim.size_h:
+                empty.empty_display_size = newAnim.size_w * 0.017
+            else:
+                empty.empty_display_size = newAnim.size_h * 0.017
+
+            # x offset (flipped)
+            empty.empty_image_offset[0] = 1 - (newAnim.offset_x / newAnim.size_w) - 1
+            # y offset (not flipped)
+            empty.empty_image_offset[1] =     (newAnim.offset_y / newAnim.size_h) - 1
+
+            # rotate toward camera
+            empty.rotation_euler[0] = 1.5708
+            empty.rotation_euler[2] = -1.5708
+
+            # add to collection
+            referencesCollection.objects.link(empty)
+
+        return {"FINISHED"}
 
 class ReliveSetModelsOperator(bpy.types.Operator):
     
@@ -557,8 +653,39 @@ class ReliveBatchRendererMainPanel(ReliveBatchRendererPanel, bpy.types.Panel):
 
         # Properties
         col.row().prop(props, "character_type", text='')
+        
+        col.row().label(text='Sprite path:')
+        col.row().prop(props, "ref_sprite_path", text='')
+        
         col.label(text="Output path:")
         col.row().prop(props, "render_path", text='')
+        
+        col.row().label(text='')
+        col.row().label(text='Tool by HTML_Earth')
+
+class ReliveBatchRendererReferencesPanel(ReliveBatchRendererPanel, bpy.types.Panel):
+    bl_idname = "VIEW3D_PT_batch_renderer_references"
+    bl_parent_id = "VIEW3D_PT_batch_renderer"
+    bl_label = "Import Reference Sprites"
+
+    def draw(self, context):
+        props = context.scene.reliveBatch
+        col = self.layout.column()
+
+        col.row().label(text='Filter')
+        col.row().prop(props, "ref_sprite_filter", text='')
+
+        col.row().operator('opr.import_reference_sprites_operator', text='IMPORT SPRITES')
+
+class ReliveBatchRendererRenderPanel(ReliveBatchRendererPanel, bpy.types.Panel):
+    bl_idname = "VIEW3D_PT_batch_renderer_render"
+    bl_parent_id = "VIEW3D_PT_batch_renderer"
+    bl_label = "Render"
+
+    def draw(self, context):
+        props = context.scene.reliveBatch
+
+        col = self.layout.column()
 
         # Render status
         col.label(text=props.batch_render_status)
@@ -577,11 +704,11 @@ class ReliveBatchRendererMainPanel(ReliveBatchRendererPanel, bpy.types.Panel):
             col.label(text="Model: " + props.current_model)
             col.label(text="Anim: " + props.current_anim)
             col.label(text="Frame: " + props.current_frame)
-
+            
 class ReliveBatchRendererModelsPanel(ReliveBatchRendererPanel, bpy.types.Panel):
     bl_idname = "VIEW3D_PT_batch_renderer_models"
     bl_parent_id = "VIEW3D_PT_batch_renderer"
-    bl_label = "Models"
+    bl_label = "Render Settings"
 
     def draw(self, context):
         props = context.scene.reliveBatch
@@ -636,15 +763,16 @@ class ReliveBatchRendererAnimationsPanel(ReliveBatchRendererPanel, bpy.types.Pan
         else:
             col.row().label(text=get_default_csv(props.character_type))
 
-class ReliveBatchRendererReferencesPanel(ReliveBatchRendererPanel, bpy.types.Panel):
-    bl_idname = "VIEW3D_PT_batch_renderer_references"
+class ReliveBatchRendererSettingsPanel(ReliveBatchRendererPanel, bpy.types.Panel):
+    bl_idname = "VIEW3D_PT_batch_renderer_settings"
     bl_parent_id = "VIEW3D_PT_batch_renderer"
-    bl_label = "References"
+    bl_label = "Advanced Settings"
     bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context):
         props = context.scene.reliveBatch
-        #col = self.layout.column()
+        col = self.layout.column()
+        col.label(text="(Used by script to find objects)")
         
         layout = self.layout
         split = layout.split(factor=0.3)
@@ -656,21 +784,24 @@ class ReliveBatchRendererReferencesPanel(ReliveBatchRendererPanel, bpy.types.Pan
         col_2.row().prop(props, "camera_name", text='')
         col_1.label(text='Rig')
         col_2.row().prop(props, "rig_name", text='')
-        
+
 
 # == MAIN ROUTINE
 
 CLASSES = [
     ReliveBatchProperties,
     
+    ReliveImportReferencesOperator,
     ReliveSetModelsOperator,
     ReliveBatchRenderOperator,
     ReliveBatchCancelOperator,
 
     ReliveBatchRendererMainPanel,
-    ReliveBatchRendererModelsPanel,
-    ReliveBatchRendererAnimationsPanel,
     ReliveBatchRendererReferencesPanel,
+    ReliveBatchRendererRenderPanel,
+    ReliveBatchRendererModelsPanel,
+    #ReliveBatchRendererAnimationsPanel,
+    ReliveBatchRendererSettingsPanel,
 ]
 
 def register():
