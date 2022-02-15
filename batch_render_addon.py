@@ -4,7 +4,7 @@ bl_info = {
     'blender': (2, 93, 0),
     'category': 'Render',
     # optional
-    'version': (0, 1, 0),
+    'version': (0, 9, 0),
     'author': 'HTML_Earth',
     'description': 'A tool to render HD sprites for RELIVE',
 }
@@ -31,17 +31,11 @@ SizeAndOffsets = namedtuple('SizeAndOffsets', 'size offset_x offset_y')
 msg_ready = 'READY'
 msg_preparing_render = 'PREPARING TO RENDER...'
 msg_rendering = 'RENDERING... {}/{}'
-msg_copying_duplicates = 'COPYING DUPLICATE FRAMES...'
 msg_done = 'DONE'
 msg_cancelling = 'CANCELLING...'
 msg_cancelled = 'CANCELLED'
 msg_check_settings = 'CHECK SETTINGS'
-error_no_csv = 'CSV FILE NOT FOUND'
-
-default_resolution_x = 137
-default_resolution_y = 180
-default_camera_scale = 3.15
-default_camera_y_pos = 0.3777
+error_path = 'PATH ERROR'
 
 pixel_size = 0.017
 
@@ -182,9 +176,15 @@ def calculate_cam_params(size_w, size_h, offset_x, offset_y):
     else:
         scale = size_h * pixel_size
     
-    # offsets
+    # offsets (x is flipped)
     x = 1 - (offset_x / size_w) - 0.5
     y =     (offset_y / size_h) - 0.5
+
+    # camera shift depends on aspect ratio
+    if size_w > size_h:
+        y = y * size_h / size_w
+    else:
+        x = x * size_w / size_h
 
     return SizeAndOffsets(scale, x, y)
 
@@ -200,7 +200,11 @@ class ReliveImportReferencesOperator(bpy.types.Operator):
 
         print("Importing reference sprites...")
 
-        anims = get_anims(props.ref_sprite_path, props.ref_sprite_filter)
+        try:
+            anims = get_anims(props.ref_sprite_path, props.ref_sprite_filter)
+        except EnvironmentError: # parent of IOError, OSError *and* WindowsError where available
+            self.report({"ERROR"}, "Sprite path is invalid")
+            return {"CANCELLED"}
 
         # Create ref collections
         referencesCollection = bpy.data.collections.new("References (" + props.ref_sprite_filter + ")")
@@ -338,6 +342,8 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
     _timer_interval = 0.1
     
     rendering_frame = False
+
+    render_multiple_models = False
     
     def pre(self, *args, **kwargs):
         self.rendering_frame = True
@@ -352,6 +358,11 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
 
         props.is_batch_rendering = True
         props.batch_render_status = msg_preparing_render
+
+        # reset stuff just in case
+        self.full_frame_count = 0
+        self.frames_to_render = []
+        self.missing_actions = []
 
         # save old resolution
         self.previous_resolution_x = context.scene.render.resolution_x
@@ -369,13 +380,22 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
 
         # save old action
         self.previous_action = context.scene.objects[props.rig_name].animation_data.action
+
+        # get list of models to render
+        models = get_models(context.scene.view_layers, props.enabled_view_layers)
+
+        # cancel if zero models
+        if len(models) < 1:
+            self.report({"WARNING"}, "No models/view layers selected!")
+            self.finished("SELECT A MODEL!")
+            return {"CANCELLED"}
         
         try:
             # Get animation list using sprite folder
             animations = get_anims(props.ref_sprite_path, "*")
         except EnvironmentError: # parent of IOError, OSError *and* WindowsError where available
-            self.report({"ERROR"}, error_no_csv)
-            self.finished(error_no_csv)
+            self.report({"ERROR"}, error_path)
+            self.finished(error_path)
             return {"CANCELLED"}
 
         for anim in animations:
@@ -392,11 +412,14 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
                     continue
                 
                 for i in range(anim.frame_count):
-                    # make relative path string
-                    file_path = Path('{}/{}/{}'.format(props.render_path, anim.name, i))
-
                     # for each enabled view layer (model)
-                    for model in get_models(context.scene.view_layers, props.enabled_view_layers):
+                    for model in get_models(context.scene.view_layers, props.enabled_view_layers):    
+                        # make relative path string (add model name to path if more than one)
+                        if len(models) > 1:
+                            file_path = Path('{}/{}/{}/{}'.format(props.render_path, model, anim.name, i))
+                        else:
+                            file_path = Path('{}/{}/{}'.format(props.render_path, anim.name, i))
+
                         # Add frame to frames_to_render
                         self.frames_to_render.append(AnimFrame(anim.name, i, anim.size_w, anim.size_h, anim.offset_x, anim.offset_y, model, file_path))
                         self.full_frame_count += 1
@@ -470,11 +493,6 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
         scene = bpy.context.scene
         props = scene.reliveBatch
 
-        #if not props.render_cancelled:
-            # COPY DUPLICATE FRAMES
-        #    props.batch_render_status = msg_copying_duplicates
-        #    copy_duplicate_frames(self.frames_to_copy)
-
         # RESET FRAME VARIABLES
         self.frames_to_render = []
         self.full_frame_count = 0
@@ -528,28 +546,28 @@ class ReliveBatchRendererMainPanel(ReliveBatchRendererPanel, bpy.types.Panel):
 
         col = self.layout.column()
 
+        version = bl_info['version']
+        version_string = str.format("{}.{}.{}", version[0],version[1],version[2])
+
+        col.row().label(text='Version ' + version_string + ' by HTML_Earth')
+
+        col.row().separator()
+
         # Properties
-        col.row().prop(props, "character_type", text='')
-        
-        col.row().label(text='Sprite path:')
-        col.row().prop(props, "ref_sprite_path", text='')
-        
-        col.label(text="Output path:")
-        col.row().prop(props, "render_path", text='')
-        
-        col.row().label(text='')
-        col.row().label(text='Tool by HTML_Earth')
+        box = col.box()
+        box.row().label(text='Extracted sprites folder:')
+        box.row().prop(props, "ref_sprite_path", text='')
 
 class ReliveBatchRendererReferencesPanel(ReliveBatchRendererPanel, bpy.types.Panel):
     bl_idname = "VIEW3D_PT_batch_renderer_references"
     bl_parent_id = "VIEW3D_PT_batch_renderer"
-    bl_label = "Import Reference Sprites"
+    bl_label = "Import Sprites"
 
     def draw(self, context):
         props = context.scene.reliveBatch
         col = self.layout.column()
 
-        col.row().label(text='Filter')
+        col.row().label(text='Filter:')
         col.row().prop(props, "ref_sprite_filter", text='')
 
         col.row().operator('opr.import_reference_sprites_operator', text='IMPORT SPRITES')
@@ -557,12 +575,15 @@ class ReliveBatchRendererReferencesPanel(ReliveBatchRendererPanel, bpy.types.Pan
 class ReliveBatchRendererRenderPanel(ReliveBatchRendererPanel, bpy.types.Panel):
     bl_idname = "VIEW3D_PT_batch_renderer_render"
     bl_parent_id = "VIEW3D_PT_batch_renderer"
-    bl_label = "Render"
+    bl_label = "Render Sprites"
 
     def draw(self, context):
         props = context.scene.reliveBatch
 
         col = self.layout.column()
+        
+        col.label(text="Output path:")
+        col.row().prop(props, "render_path", text='')
 
         # Render status
         col.label(text=props.batch_render_status)
@@ -585,13 +606,14 @@ class ReliveBatchRendererRenderPanel(ReliveBatchRendererPanel, bpy.types.Panel):
 class ReliveBatchRendererModelsPanel(ReliveBatchRendererPanel, bpy.types.Panel):
     bl_idname = "VIEW3D_PT_batch_renderer_models"
     bl_parent_id = "VIEW3D_PT_batch_renderer"
-    bl_label = "Render Settings"
+    bl_label = "Settings"
 
     def draw(self, context):
         props = context.scene.reliveBatch
         col = self.layout.column()
 
         col.label(text="Presets:")
+        col.row().prop(props, "character_type", text='')
 
         if props.character_type == 'mud':
             col.row().operator('opr.set_batch_view_layers', text='All models').preset = 'mud_all_models'
@@ -619,13 +641,14 @@ class ReliveBatchRendererModelsPanel(ReliveBatchRendererPanel, bpy.types.Panel):
             row2.operator('opr.set_batch_view_layers', text='Dripik').preset = 'gluk_dripik_fmv'
 
         col.label(text="View Layers:")
+        box = col.box()
         for i, model in enumerate(context.scene.view_layers):
-            col.row().prop(props, "enabled_view_layers", index=i, text=model.name)
+            box.row().prop(props, "enabled_view_layers", index=i, text=model.name)
 
 class ReliveBatchRendererSettingsPanel(ReliveBatchRendererPanel, bpy.types.Panel):
     bl_idname = "VIEW3D_PT_batch_renderer_settings"
     bl_parent_id = "VIEW3D_PT_batch_renderer"
-    bl_label = "Advanced Settings"
+    bl_label = "Misc."
     bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context):
