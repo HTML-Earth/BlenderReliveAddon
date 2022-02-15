@@ -9,7 +9,7 @@ bl_info = {
     'description': 'A tool to render HD sprites for RELIVE',
 }
 
-import bpy, os, json, fnmatch, itertools, csv
+import bpy, os, json, fnmatch
 from pathlib import Path
 from shutil import copyfile
 from collections import namedtuple
@@ -17,32 +17,13 @@ from collections import namedtuple
 # == CUSTOM DATATYPES
 
 # Animation from new asset tool
-NewAnim = namedtuple('NewAnim', 'name frame_count size_w size_h offset_x offset_y')
+AnimMeta = namedtuple('AnimMeta', 'name frame_count size_w size_h offset_x offset_y')
 
-# Animation info collected from each row in csv file
-AnimInfo = namedtuple('AnimInfo', 'id frame_string width height model_type')
-    # id - name of BAN/BND and id (used for folder/file names)
-    # frame_string - string describing which frames to use
-    # width - img width
-    # height - img height
-    # model_type - model/collection to use
+# Settings to render a single frame
+AnimFrame = namedtuple('AnimFrame', 'name index size_w size_h offset_x offset_y, model, file_path')
 
-# Frame info parsed from frame string
-FrameInfo = namedtuple('FrameInfo', 'index action_name action_frame')
-    # index - the index of the animation which this frame represents
-    # action_name - the name of the blender action to use
-    # action_frame - which frame of the blender action to use
-
-# Data needed to render a single frame (multiple of these are generated for each AnimInfo)
-RenderFrame = namedtuple('RenderFrame', 'anim_id frame_index width height action action_frame model file_path')
-    # anim_id - name of BAN/BND and id (used for folder/file names)
-    # frame_index - the index of the previous anim_id which this frame represents
-    # width - img width
-    # height - img height
-    # action - which blender action to use
-    # action_frame - which frame of the blender action to use
-    # model - which model to use (this is the name of a view layer in blender)
-    # file_path - the rendered image's output file path
+# Settings used for reference images and camera (NOTE: same container, but different values)
+SizeAndOffsets = namedtuple('SizeAndOffsets', 'size offset_x offset_y')
 
 # == CONSTANTS
 
@@ -61,6 +42,8 @@ default_resolution_x = 137
 default_resolution_y = 180
 default_camera_scale = 3.15
 default_camera_y_pos = 0.3777
+
+pixel_size = 0.017
 
 # model types
 all_model_types = ['default'] #TODO: add 'gibs' as well
@@ -127,16 +110,6 @@ class ReliveBatchProperties(bpy.types.PropertyGroup):
 
 # == UTILS
 
-def get_default_csv(character_type):
-    if character_type == 'mud':
-        return 'mud_anims.csv'
-    elif character_type == 'slig':
-        return 'slig_anims.csv'
-    elif character_type == 'gluk':
-        return 'gluk_anims.csv'
-    else:
-        return 'anims.csv'
-
 def check_model_type(model_type):
     if model_type in all_model_types:
         return True
@@ -165,31 +138,9 @@ def get_anims(sprite_folder, filter):
             if frame_count < 1:
                 continue
 
-            anims.append(NewAnim(folder.name, frame_count, size_w, size_h, offset_x, offset_y))
+            anims.append(AnimMeta(folder.name, frame_count, size_w, size_h, offset_x, offset_y))
 
     return anims
-
-# Parses string and returns list of FrameInfos
-def get_frame_list(frame_string):
-    frame_list = []
-    frame_index = 0
-    
-    for anim_access in frame_string.split(";"):
-        action_name = anim_access.split(":")[0][1:]
-        frames = anim_access.split(":")[1]
-        
-        if "," in frames:
-            for frame in frames.split(","):
-                frame_info = FrameInfo(frame_index, action_name, int(frame))
-                frame_list.append(frame_info)
-                frame_index += 1
-        else:
-            for i in range(int(frames)):
-                frame_info = FrameInfo(frame_index, action_name, i)
-                frame_list.append(frame_info)
-                frame_index += 1
-                
-    return frame_list
 
 def get_models(view_layers, enabled_view_layers):
     models = []
@@ -208,65 +159,34 @@ def get_action(action_name):
     print('Action: {} not available'.format(action_name))
     return None
 
-def copy_duplicate_frames(frames_to_copy):
-    print('COPYING DUPLICATE FRAMES...')
-    for dupe in frames_to_copy:
-        src = os.path.realpath(bpy.path.abspath('{}.png'.format(dupe[0])))
-        dst = os.path.realpath(bpy.path.abspath('{}.png'.format(dupe[1])))
-
-        #print('source: {}\ndestination: {}'.format(src, dst))
-        if not os.path.isdir(os.path.dirname(dst)):
-            os.mkdir(os.path.dirname(dst))
-
-        print('COPYING {} TO {}'.format(src, dst))
-        copyfile(src, dst)
-
 def apply_action(action):
-    bpy.context.scene.objects[bpy.context.scene.reliveBatch.rig_name].animation_data.action = action
+    bpy.context.scene.objects[bpy.context.scene.reliveBatch.rig_name].animation_data.action = bpy.data.actions[action]
 
-def calculate_cam_scale(width, height, character_type):
-    if character_type == 'mud':
-        return 0.0175 * height
-
-    elif character_type == 'slig':
-        if width > height:
-            return 0.011 * width # cursed numbers
-        else:
-            return 0.01032 * height # whyyyy
-
-    elif character_type == 'gluk':
-        if height == 254:
-            return 0.013244 * height
-        else:
-            return 0.01682 * height
-
+def calculate_reference_params(size_w, size_h, offset_x, offset_y):
+    # set size depending on aspect ratio
+    if size_w > size_h:
+        size = size_w * pixel_size
     else:
-        return 1
-    
-def calculate_cam_y(width, height, character_type):
-    if character_type == 'mud':
-        return 0.5 - (22 / height)
+        size = size_h * pixel_size
 
-    elif character_type == 'slig':
-        if width > height:
-            return 22 / height # why does this work?
-        else:
-            return 0.5 - (22 / height)
+    # offsets (x is flipped)
+    x = 1 - (offset_x / size_w) - 1
+    y =     (offset_y / size_h) - 1
 
-    elif character_type == 'gluk':
-        if height == 254:
-            return 0.5 - (57 / height)
-    
-        if height == 140:
-            return 0.5 - (22 / height)
-        
-        if height == 120:
-            return 0.5 - (25 / height)
-        
-        return 0.5 - (45 / height)
+    return SizeAndOffsets(size, x, y)
 
+def calculate_cam_params(size_w, size_h, offset_x, offset_y):
+    # set ortho scale depending on aspect ratio
+    if size_w > size_h:
+        scale = size_w * pixel_size
     else:
-        return 1
+        scale = size_h * pixel_size
+    
+    # offsets
+    x = 1 - (offset_x / size_w) - 0.5
+    y =     (offset_y / size_h) - 0.5
+
+    return SizeAndOffsets(scale, x, y)
 
 # == OPERATORS
 
@@ -280,9 +200,7 @@ class ReliveImportReferencesOperator(bpy.types.Operator):
 
         print("Importing reference sprites...")
 
-        newAnims = get_anims(props.ref_sprite_path, props.ref_sprite_filter)
-        #newAnims.append(NewAnim("Mudokon_Chant", 10, 81, 136, 31, 118))
-        #newAnims.append(NewAnim("Mudokon_ChantEnd", 3, 76, 136, 31, 118))
+        anims = get_anims(props.ref_sprite_path, props.ref_sprite_filter)
 
         # Create ref collections
         referencesCollection = bpy.data.collections.new("References (" + props.ref_sprite_filter + ")")
@@ -291,14 +209,14 @@ class ReliveImportReferencesOperator(bpy.types.Operator):
         referencesCollection.hide_select = True
 
         # Add all reference image sequences
-        for newAnim in newAnims:
+        for anim in anims:
             # load image and set to sequence
-            img = bpy.data.images.load("//" + props.ref_sprite_path + "/" + newAnim.name + "/0.png")
-            img.name = newAnim.name
+            img = bpy.data.images.load("//" + props.ref_sprite_path + "/" + anim.name + "/0.png")
+            img.name = anim.name
             img.source = 'SEQUENCE'
 
             # create new empty
-            empty = bpy.data.objects.new(newAnim.name, None)
+            empty = bpy.data.objects.new(anim.name, None)
 
             # set empty to use image sequence
             empty.empty_display_type = 'IMAGE'
@@ -307,22 +225,17 @@ class ReliveImportReferencesOperator(bpy.types.Operator):
             # set sequence frames
             #   for some reason the frame count starts at 0
             #   and the first frame starts at 1... Blender pls
-            empty.image_user.frame_duration = newAnim.frame_count - 1
+            empty.image_user.frame_duration = anim.frame_count - 1
             empty.image_user.frame_start = 1
 
             # enable alpha
             empty.use_empty_image_alpha = True
 
-            # set size depending on aspect ratio
-            if newAnim.size_w > newAnim.size_h:
-                empty.empty_display_size = newAnim.size_w * 0.017
-            else:
-                empty.empty_display_size = newAnim.size_h * 0.017
-
-            # x offset (flipped)
-            empty.empty_image_offset[0] = 1 - (newAnim.offset_x / newAnim.size_w) - 1
-            # y offset (not flipped)
-            empty.empty_image_offset[1] =     (newAnim.offset_y / newAnim.size_h) - 1
+            # set size and offsets
+            empty_img_settings = calculate_reference_params(anim.size_w, anim.size_h, anim.offset_x, anim.offset_y)
+            empty.empty_display_size = empty_img_settings.size
+            empty.empty_image_offset[0] = empty_img_settings.offset_x
+            empty.empty_image_offset[1] = empty_img_settings.offset_y
 
             # rotate toward camera
             empty.rotation_euler[0] = 1.5708
@@ -418,7 +331,6 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
     full_frame_count = 0
 
     frames_to_render = []
-    frames_to_copy = []
 
     missing_actions = []
 
@@ -457,74 +369,37 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
 
         # save old action
         self.previous_action = context.scene.objects[props.rig_name].animation_data.action
-
-        # Get CSV path
-        if props.use_custom_csv:
-            csv_path = props.custom_csv_path
-        else:
-            csv_path = get_default_csv(props.character_type)
         
         try:
-            # Gather all frames from csv into collection
-            with open(csv_path) as csvfile:
-                rdr = csv.reader(csvfile)
-                for i, row in enumerate( rdr ):
-                    if i == 0:
-                        continue
-                    
-                    # create AnimInfo from current row
-                    anim = AnimInfo(row[0], row[1], int(row[2]), int(row[3]), row[4])
-                    
-                    # check if model type is available
-                    if not check_model_type(anim.model_type):
-                        print('Model type: {} not available'.format(anim.model_type))
-                        continue
-                    
-                    # parse frame string to get list of frames
-                    frame_list = get_frame_list(anim.frame_string)
-
-                    # for each enabled view layer (model)
-                    for model in get_models(context.scene.view_layers, props.enabled_view_layers):
-
-                        # for each frame in frame list
-                        for frame_info in frame_list:
-
-                            # if action is in missing action list, skip it
-                            if frame_info.action_name in self.missing_actions:
-                                continue
-
-                            # get action handle from action name
-                            action = get_action(frame_info.action_name)
-                            # if action is missing, add to list of missing actions
-                            if action == None:
-                                self.missing_actions.append(frame_info.action_name)
-                            # if action exists
-                            else:
-                                # assume that the frame is unique
-                                unique = True
-
-                                # make relative path string
-                                file_path = Path('{}/{}/{}/{}_{}'.format(props.render_path, model, anim.id.split('_')[0], anim.id, frame_info.index))
-
-                                for prev_frame in self.frames_to_render:
-                                    # if frame already in self.frames_to_render
-                                    if prev_frame.action == action and prev_frame.action_frame == frame_info.action_frame and prev_frame.model == model and prev_frame.width == anim.width and prev_frame.height == anim.height:
-                                        # frame is no longer considered unique
-                                        unique = False
-                                        # add frame to frames_to_copy instead
-                                        self.frames_to_copy.append((prev_frame.file_path, file_path))
-                                        print('{} will be copied to {}'.format(prev_frame.file_path, file_path))
-                                        break
-
-                                if unique:
-                                    # Add frame to frames_to_render
-                                    self.frames_to_render.append(RenderFrame(anim.id, frame_info.index, anim.width, anim.height, action, frame_info.action_frame, model, file_path))
-                                    self.full_frame_count += 1
-                                    
+            # Get animation list using sprite folder
+            animations = get_anims(props.ref_sprite_path, "*")
         except EnvironmentError: # parent of IOError, OSError *and* WindowsError where available
             self.report({"ERROR"}, error_no_csv)
             self.finished(error_no_csv)
             return {"CANCELLED"}
+
+        for anim in animations:
+                
+                # if action is in missing action list, skip it
+                if anim.name in self.missing_actions:
+                    continue
+
+                # get action handle from action name
+                action = get_action(anim.name)
+                # if action is missing, add to list of missing actions
+                if action == None:
+                    self.missing_actions.append(anim.name)
+                    continue
+                
+                for i in range(anim.frame_count):
+                    # make relative path string
+                    file_path = Path('{}/{}/{}'.format(props.render_path, anim.name, i))
+
+                    # for each enabled view layer (model)
+                    for model in get_models(context.scene.view_layers, props.enabled_view_layers):
+                        # Add frame to frames_to_render
+                        self.frames_to_render.append(AnimFrame(anim.name, i, anim.size_w, anim.size_h, anim.offset_x, anim.offset_y, model, file_path))
+                        self.full_frame_count += 1
 
         # set render display setting to avoid window popups for each render
         context.preferences.view.render_display_type = 'NONE'
@@ -563,22 +438,25 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
                 frame = self.frames_to_render[0]
 
                 props.current_model = frame.model
-                props.current_anim = frame.action.name
-                props.current_frame = str(frame.action_frame)
+                props.current_anim = frame.name
+                props.current_frame = str(frame.index)
                 
                 # Apply action
-                apply_action(frame.action)
+                apply_action(frame.name)
                 
                 # Set current frame
-                sc.frame_set(frame.action_frame)
+                sc.frame_set(frame.index)
                 
                 # Set output resolution
-                sc.render.resolution_x = frame.width
-                sc.render.resolution_y = frame.height
+                sc.render.resolution_x = frame.size_w
+                sc.render.resolution_y = frame.size_h
+
+                camera_settings = calculate_cam_params(frame.size_w, frame.size_h, frame.offset_x, frame.offset_y)
                 
                 # Setup camera position and scale
-                bpy.data.cameras[props.camera_name].ortho_scale = calculate_cam_scale(frame.width, frame.height, props.character_type)
-                bpy.data.cameras[props.camera_name].shift_y     = calculate_cam_y    (frame.width, frame.height, props.character_type)
+                bpy.data.cameras[props.camera_name].ortho_scale = camera_settings.size
+                bpy.data.cameras[props.camera_name].shift_x     = camera_settings.offset_x
+                bpy.data.cameras[props.camera_name].shift_y     = camera_settings.offset_y
 
                 # Set file path
                 sc.render.filepath = '//{}'.format(frame.file_path)
@@ -592,14 +470,13 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
         scene = bpy.context.scene
         props = scene.reliveBatch
 
-        if not props.render_cancelled:
+        #if not props.render_cancelled:
             # COPY DUPLICATE FRAMES
-            props.batch_render_status = msg_copying_duplicates
-            copy_duplicate_frames(self.frames_to_copy)
+        #    props.batch_render_status = msg_copying_duplicates
+        #    copy_duplicate_frames(self.frames_to_copy)
 
         # RESET FRAME VARIABLES
         self.frames_to_render = []
-        self.frames_to_copy = []
         self.full_frame_count = 0
 
         self.missing_actions = []
@@ -745,24 +622,6 @@ class ReliveBatchRendererModelsPanel(ReliveBatchRendererPanel, bpy.types.Panel):
         for i, model in enumerate(context.scene.view_layers):
             col.row().prop(props, "enabled_view_layers", index=i, text=model.name)
 
-class ReliveBatchRendererAnimationsPanel(ReliveBatchRendererPanel, bpy.types.Panel):
-    bl_idname = "VIEW3D_PT_batch_renderer_animations"
-    bl_parent_id = "VIEW3D_PT_batch_renderer"
-    bl_label = "Animations"
-    bl_options = {"DEFAULT_CLOSED"}
-
-    def draw(self, context):
-        props = context.scene.reliveBatch
-        col = self.layout.column()
-
-        # Properties
-        col.row().prop(props, "use_custom_csv")
-        col.row().label(text="CSV File:")
-        if props.use_custom_csv:
-            col.row().prop(props, "custom_csv_path", text='')
-        else:
-            col.row().label(text=get_default_csv(props.character_type))
-
 class ReliveBatchRendererSettingsPanel(ReliveBatchRendererPanel, bpy.types.Panel):
     bl_idname = "VIEW3D_PT_batch_renderer_settings"
     bl_parent_id = "VIEW3D_PT_batch_renderer"
@@ -785,7 +644,6 @@ class ReliveBatchRendererSettingsPanel(ReliveBatchRendererPanel, bpy.types.Panel
         col_1.label(text='Rig')
         col_2.row().prop(props, "rig_name", text='')
 
-
 # == MAIN ROUTINE
 
 CLASSES = [
@@ -800,7 +658,6 @@ CLASSES = [
     ReliveBatchRendererReferencesPanel,
     ReliveBatchRendererRenderPanel,
     ReliveBatchRendererModelsPanel,
-    #ReliveBatchRendererAnimationsPanel,
     ReliveBatchRendererSettingsPanel,
 ]
 
