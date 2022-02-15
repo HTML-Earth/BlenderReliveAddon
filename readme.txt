@@ -1,8 +1,8 @@
 INSTALLING THE ADDON:
 (1) Open Blender and go to Edit --> Preferences --> Add-ons --> Install
-(2) Find and select batch_render_addon.zip
-(3) Make sure the checkbox next to [ADDON NAME HERE] is checked
-(4) You can close Blender again
+(2) Find and select relive_render_addon.py
+(3) Make sure the checkbox next to "Render: Batch Renderer for RELIVE" is checked
+(4) You can close Blender again (preferences should save automatically)
 
 SETTING UP PREREQUISITES:
 (1) Download mlgthatsme's HD release (with asset_tool.exe)
@@ -25,7 +25,7 @@ IMPORTING REFERENCE SPRITES (OPTIONAL):
 (7) There should now be a new collection in the outliner with all of the
     imported references, with proper sizes and offsets.
 
-RENDERING SPRITES:
+RENDERING SPRITES (Step 1-4 same as above):
 (1) Open mudokon_sprites.blend (or similar)
 (2) Hover over a 3D view and press N to toggle [SIDE PANE]
 (3) There should be a "RELIVE" tab. Select it.
