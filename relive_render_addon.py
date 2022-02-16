@@ -4,7 +4,7 @@ bl_info = {
     'blender': (2, 93, 0),
     'category': 'Render',
     # optional
-    'version': (0, 9, 0),
+    'version': (0, 9, 1),
     'author': 'HTML_Earth',
     'description': 'A tool to render HD sprites for RELIVE',
 }
@@ -78,7 +78,10 @@ class ReliveBatchProperties(bpy.types.PropertyGroup):
     # FILE PATHS
     render_path : bpy.props.StringProperty(name='Render Path', default='renders', description="Renders will be saved to this path (relative to .blend file)")
     ref_sprite_path : bpy.props.StringProperty(name='Reference Sprites Path', default='sprites', description="Sprites will be loaded from this path (relative to .blend file)")
+    
+    # Filters
     ref_sprite_filter : bpy.props.StringProperty(name='Reference Sprite filter', default='Mudokon*', description="Only animations that match the filter will be imported")
+    animation_filter : bpy.props.StringProperty(name='Exported animation filter', default='*', description="Only animations that match the filter will be rendered")
 
     enabled_view_layers : bpy.props.BoolVectorProperty(
         name = "ViewLayers",
@@ -392,7 +395,7 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
         
         try:
             # Get animation list using sprite folder
-            animations = get_anims(props.ref_sprite_path, "*")
+            animations = get_anims(props.ref_sprite_path, props.animation_filter)
         except EnvironmentError: # parent of IOError, OSError *and* WindowsError where available
             self.report({"ERROR"}, error_path)
             self.finished(error_path)
@@ -582,6 +585,9 @@ class ReliveBatchRendererRenderPanel(ReliveBatchRendererPanel, bpy.types.Panel):
 
         col = self.layout.column()
         
+        col.row().label(text='Filter:')
+        col.row().prop(props, "animation_filter", text='')
+
         col.label(text="Output path:")
         col.row().prop(props, "render_path", text='')
 
