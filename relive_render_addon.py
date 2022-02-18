@@ -35,7 +35,7 @@ msg_done = 'DONE'
 msg_cancelling = 'CANCELLING...'
 msg_cancelled = 'CANCELLED'
 msg_check_settings = 'CHECK SETTINGS'
-error_path = 'PATH ERROR'
+error_path = 'PATH ERROR. Do not open the file from within Blender. Start Blender by opening the file directly.'
 
 pixel_size = 0.017
 
