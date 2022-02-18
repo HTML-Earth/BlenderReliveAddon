@@ -4,7 +4,7 @@ bl_info = {
     'blender': (2, 93, 0),
     'category': 'Render',
     # optional
-    'version': (0, 9, 2),
+    'version': (0, 9, 3),
     'author': 'HTML_Earth',
     'description': 'A tool to render HD sprites for RELIVE',
 }
@@ -37,10 +37,10 @@ msg_cancelled = 'CANCELLED'
 msg_check_settings = 'CHECK SETTINGS'
 error_path = 'PATH ERROR. Do not open the file from within Blender. Start Blender by opening the file directly.'
 
-pixel_size = 0.017
+default_pass_name = "_DEFAULT"
+emissive_pass_name = "_emissive"
 
-# model types
-all_model_types = ['default'] #TODO: add 'gibs' as well
+pixel_size = 0.017
 
 # mudokon view layers
 mud_all_models = ['abe_game', 'abe_game_orange', 'abe_fmv', 'mud_green_game', 'mud_green_game_orange', 'mud_green_fmv', 'mud_blind_game', 'mud_blind_fmv']
@@ -69,7 +69,8 @@ class ReliveBatchProperties(bpy.types.PropertyGroup):
 
     character_type : bpy.props.EnumProperty(
         name= "Character",
-        items= [('mud', "Mudokon", ""),
+        items= [('none', "None", ""),
+                ('mud', "Mudokon", ""),
                 ('slig', "Slig", ""),
                 ('gluk', "Glukkon", "")
         ]
@@ -82,6 +83,9 @@ class ReliveBatchProperties(bpy.types.PropertyGroup):
     # Filters
     ref_sprite_filter : bpy.props.StringProperty(name='Reference Sprite filter', default='Mudokon*', description="Only animations that match the filter will be imported")
     animation_filter : bpy.props.StringProperty(name='Exported animation filter', default='*', description="Only animations that match the filter will be rendered")
+
+    # Pass
+    pass_to_use : bpy.props.StringProperty(name='Render pass to use', default='', description="This will be appended to the exported filenames (Leave empty for default)\n\n'emissive' - turns off transparency and hides the light collection")
 
     enabled_view_layers : bpy.props.BoolVectorProperty(
         name = "ViewLayers",
@@ -96,6 +100,7 @@ class ReliveBatchProperties(bpy.types.PropertyGroup):
     # SCENE REFS
     camera_name : bpy.props.StringProperty(name='Camera', default='Camera', description="The name of the main camera used to render")
     rig_name : bpy.props.StringProperty(name='Rig', default='rig', description="The name of the main character rig")
+    lights_collection : bpy.props.StringProperty(name='Lights', default='Lights', description="The name of the collection containing all lights")
 
     # PRIVATE
     batch_render_status : bpy.props.StringProperty(name='Current status of batch renderer', default=msg_ready)
@@ -104,12 +109,9 @@ class ReliveBatchProperties(bpy.types.PropertyGroup):
     current_model : bpy.props.StringProperty(name='Current model', default='')
     current_anim : bpy.props.StringProperty(name='Current animation', default='')
 
-# == UTILS
+    current_pass : bpy.props.StringProperty(name='Current animation', default=default_pass_name)
 
-def check_model_type(model_type):
-    if model_type in all_model_types:
-        return True
-    return False
+# == UTILS
 
 def get_anims(sprite_folder, filter):
     anim_folders = [f for f in Path(sprite_folder).iterdir() if f.is_dir()]
@@ -352,20 +354,25 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
         bpy.context.scene.reliveBatch.batch_render_status = msg_rendering.format(str(self.full_anim_count - len(self.anims_to_render)), str(self.full_anim_count))
 
     def post(self, *args, **kwargs):
+        prefix = bpy.context.scene.reliveBatch.current_pass
+
         export_path = self.anims_to_render.pop(0).file_path
-        export_folder = export_path.removesuffix('/render')
+        export_folder = export_path.removesuffix('/' + prefix)
         print(export_folder)
 
         files = [f for f in Path(export_folder).iterdir() if f.is_file()]
 
         for file in files:
             print("checking {}".format(file.name))
-            if file.name.startswith("render") and file.suffix == ".png":
-                new_name = file.name.removeprefix("render").lstrip('0')
-                if new_name == ".png":
-                    new_name = "0.png"
+            if file.name.startswith(prefix) and file.suffix == ".png":
+                new_name = file.name.removeprefix(prefix).lstrip('0').removesuffix(".png")
+                if new_name == "":
+                    new_name = "0"
 
-                new_path = export_folder + "/" + new_name
+                if prefix == default_pass_name:
+                    new_path = export_folder + "/" + new_name + ".png"
+                else:
+                    new_path = export_folder + "/" + new_name + prefix + ".png"
 
                 print("renaming to {}".format(new_path))
                 file.replace(new_path)
@@ -422,6 +429,37 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
             self.finished(error_path)
             return {"CANCELLED"}
 
+        # Set current pass (and make sure it starts with '_')
+        props.current_pass = props.pass_to_use if props.pass_to_use != "" else default_pass_name
+        if not props.current_pass.startswith('_'):
+            props.current_pass = '_' + props.current_pass
+
+        # Set BG to transparent if pass is not emissive
+        self.previous_bg_transparent = context.scene.render.film_transparent
+        context.scene.render.film_transparent = props.current_pass != emissive_pass_name
+        
+        if props.current_pass == emissive_pass_name:
+            try:
+                self.previous_lights_should_be_hidden = {}
+
+                # go through all view layers
+                for model in get_models(context.scene.view_layers, props.enabled_view_layers):
+                    # check light collection status in this view layer
+                    hide_render = context.scene.view_layers[model].layer_collection.children[props.lights_collection].collection.hide_render
+                    
+                    print("Previous light collection for {} was {}".format(model, hide_render))
+
+                    # add the status to a dict
+                    self.previous_lights_should_be_hidden.update({model: hide_render})
+
+                    # hide lights
+                    context.scene.view_layers[model].layer_collection.children[props.lights_collection].collection.hide_render = True
+            
+            except:
+                self.report({"ERROR"}, "Could not find lights collection to hide.")
+                self.finished("Check Misc./Lights")
+                return {"CANCELLED"}
+
         for anim in animations:
                 
                 # if action is in missing action list, skip it
@@ -438,12 +476,12 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
                 #for i in range(anim.frame_count):
 
                 # for each enabled view layer (model)
-                for model in get_models(context.scene.view_layers, props.enabled_view_layers):    
+                for model in get_models(context.scene.view_layers, props.enabled_view_layers):
                     # make relative path string (add model name to path if more than one)
                     if len(models) > 1:
-                        file_path = '{}/{}/{}/{}'.format(props.render_path, model, anim.name, "render") #TODO: replace render with name of pass
+                        file_path = '{}/{}/{}/{}'.format(props.render_path, model, anim.name, props.current_pass)
                     else:
-                        file_path = '{}/{}/{}'.format(props.render_path, anim.name, "render")
+                        file_path = '{}/{}/{}'.format(props.render_path, anim.name, props.current_pass)
 
                     # Add frame to frames_to_render
                     self.anims_to_render.append(AnimToRender(anim, model, file_path))
@@ -544,6 +582,20 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
 
         # RESET RENDER DISPLAY SETTING
         bpy.context.preferences.view.render_display_type = self.previous_render_display_type
+
+        # RESET BG TRANSPARENCY SETTING
+        scene.render.film_transparent = self.previous_bg_transparent
+
+        # RESET LIGHTS COLLECTION RENDERABILITY
+        if props.current_pass == emissive_pass_name:
+            try:
+                # go through all view layers
+                for model in get_models(scene.view_layers, props.enabled_view_layers):
+                    print("Resetting light collection for {} to {}".format(model, self.previous_lights_should_be_hidden[model]))
+                    # reset lights
+                    scene.view_layers[model].layer_collection.children[props.lights_collection].collection.hide_render = self.previous_lights_should_be_hidden[model]
+            except:
+                print("failed to reset light collection renderability")
         
         props.current_model = ""
         props.current_anim = ""
@@ -637,8 +689,16 @@ class ReliveBatchRendererModelsPanel(ReliveBatchRendererPanel, bpy.types.Panel):
     def draw(self, context):
         props = context.scene.reliveBatch
         col = self.layout.column()
+        
+        col.row().label(text='Render pass name:')
+        col.row().prop(props, "pass_to_use", text='')
 
-        col.label(text="Presets:")
+        col.label(text="View Layers:")
+        box = col.box()
+        for i, model in enumerate(context.scene.view_layers):
+            box.row().prop(props, "enabled_view_layers", index=i, text=model.name)
+
+        col.label(text="Presets: (not that useful atm)")
         col.row().prop(props, "character_type", text='')
 
         if props.character_type == 'mud':
@@ -655,21 +715,16 @@ class ReliveBatchRendererModelsPanel(ReliveBatchRendererPanel, bpy.types.Panel):
         elif props.character_type == 'slig':
             col.row().operator('opr.set_batch_view_layers', text='All models').preset = 'slig_all_models'
 
-        elif props.character_type == 'gluk':
-            col.row().operator('opr.set_batch_view_layers', text='All models').preset = 'gluk_all_models'
+        #elif props.character_type == 'gluk':
+            #col.row().operator('opr.set_batch_view_layers', text='All models').preset = 'gluk_all_models'
 
-            row1 = col.row()
-            row1.operator('opr.set_batch_view_layers', text='Jr. Exec (All)').preset = 'gluk_rf_exec_fmv_all'
-            row1.operator('opr.set_batch_view_layers', text='Jr. Exec (Game)').preset = 'gluk_jr_exec_game'
+            #row1 = col.row()
+            #row1.operator('opr.set_batch_view_layers', text='Jr. Exec (All)').preset = 'gluk_rf_exec_fmv_all'
+            #row1.operator('opr.set_batch_view_layers', text='Jr. Exec (Game)').preset = 'gluk_jr_exec_game'
 
-            row2 = col.row()
-            row2.operator('opr.set_batch_view_layers', text='Aslik').preset = 'gluk_aslik_fmv'
-            row2.operator('opr.set_batch_view_layers', text='Dripik').preset = 'gluk_dripik_fmv'
-
-        col.label(text="View Layers:")
-        box = col.box()
-        for i, model in enumerate(context.scene.view_layers):
-            box.row().prop(props, "enabled_view_layers", index=i, text=model.name)
+            #row2 = col.row()
+            #row2.operator('opr.set_batch_view_layers', text='Aslik').preset = 'gluk_aslik_fmv'
+            #row2.operator('opr.set_batch_view_layers', text='Dripik').preset = 'gluk_dripik_fmv'
 
 class ReliveBatchRendererSettingsPanel(ReliveBatchRendererPanel, bpy.types.Panel):
     bl_idname = "VIEW3D_PT_batch_renderer_settings"
@@ -692,6 +747,8 @@ class ReliveBatchRendererSettingsPanel(ReliveBatchRendererPanel, bpy.types.Panel
         col_2.row().prop(props, "camera_name", text='')
         col_1.label(text='Rig')
         col_2.row().prop(props, "rig_name", text='')
+        col_1.label(text='Lights')
+        col_2.row().prop(props, "lights_collection", text='')
 
 # == MAIN ROUTINE
 
