@@ -4,7 +4,7 @@ bl_info = {
     'blender': (2, 93, 0),
     'category': 'Render',
     # optional
-    'version': (0, 9, 1),
+    'version': (0, 9, 2),
     'author': 'HTML_Earth',
     'description': 'A tool to render HD sprites for RELIVE',
 }
@@ -19,8 +19,8 @@ from collections import namedtuple
 # Animation from new asset tool
 AnimMeta = namedtuple('AnimMeta', 'name frame_count size_w size_h offset_x offset_y')
 
-# Settings to render a single frame
-AnimFrame = namedtuple('AnimFrame', 'name index size_w size_h offset_x offset_y, model, file_path')
+# Settings to render an animation
+AnimToRender = namedtuple('AnimToRender', 'meta, model, file_path')
 
 # Settings used for reference images and camera (NOTE: same container, but different values)
 SizeAndOffsets = namedtuple('SizeAndOffsets', 'size offset_x offset_y')
@@ -103,7 +103,6 @@ class ReliveBatchProperties(bpy.types.PropertyGroup):
     render_cancelled : bpy.props.BoolProperty(name='Batch render is being cancelled', default=False)
     current_model : bpy.props.StringProperty(name='Current model', default='')
     current_anim : bpy.props.StringProperty(name='Current animation', default='')
-    current_frame : bpy.props.StringProperty(name='Current frame', default='')
 
 # == UTILS
 
@@ -335,26 +334,45 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
     bl_idname = 'opr.batch_renderer_operator'
     bl_label = 'Batch Renderer'
     
-    full_frame_count = 0
+    full_anim_count = 0
 
-    frames_to_render = []
+    anims_to_render = []
 
     missing_actions = []
 
     _timer = None
     _timer_interval = 0.1
     
-    rendering_frame = False
+    rendering_animation = False
 
     render_multiple_models = False
     
     def pre(self, *args, **kwargs):
-        self.rendering_frame = True
-        bpy.context.scene.reliveBatch.batch_render_status = msg_rendering.format(str(self.full_frame_count - len(self.frames_to_render)), str(self.full_frame_count))
+        self.rendering_animation = True
+        bpy.context.scene.reliveBatch.batch_render_status = msg_rendering.format(str(self.full_anim_count - len(self.anims_to_render)), str(self.full_anim_count))
 
     def post(self, *args, **kwargs):
-        self.frames_to_render.pop(0)
-        self.rendering_frame = False
+        export_path = self.anims_to_render.pop(0).file_path
+        export_folder = export_path.removesuffix('/render')
+        print(export_folder)
+
+        files = [f for f in Path(export_folder).iterdir() if f.is_file()]
+
+        for file in files:
+            print("checking {}".format(file.name))
+            if file.name.startswith("render") and file.suffix == ".png":
+                new_name = file.name.removeprefix("render").lstrip('0')
+                if new_name == ".png":
+                    new_name = "0.png"
+
+                new_path = export_folder + "/" + new_name
+
+                print("renaming to {}".format(new_path))
+                file.replace(new_path)
+            else:
+                print("suffix was {}".format(file.suffix))
+
+        self.rendering_animation = False
     
     def execute(self, context):
         props = context.scene.reliveBatch
@@ -363,9 +381,12 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
         props.batch_render_status = msg_preparing_render
 
         # reset stuff just in case
-        self.full_frame_count = 0
-        self.frames_to_render = []
+        self.full_anim_count = 0
+        self.anims_to_render = []
         self.missing_actions = []
+
+        # save old duration
+        self.previous_frame_end = context.scene.frame_end
 
         # save old resolution
         self.previous_resolution_x = context.scene.render.resolution_x
@@ -414,24 +435,25 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
                     self.missing_actions.append(anim.name)
                     continue
                 
-                for i in range(anim.frame_count):
-                    # for each enabled view layer (model)
-                    for model in get_models(context.scene.view_layers, props.enabled_view_layers):    
-                        # make relative path string (add model name to path if more than one)
-                        if len(models) > 1:
-                            file_path = Path('{}/{}/{}/{}'.format(props.render_path, model, anim.name, i))
-                        else:
-                            file_path = Path('{}/{}/{}'.format(props.render_path, anim.name, i))
+                #for i in range(anim.frame_count):
 
-                        # Add frame to frames_to_render
-                        self.frames_to_render.append(AnimFrame(anim.name, i, anim.size_w, anim.size_h, anim.offset_x, anim.offset_y, model, file_path))
-                        self.full_frame_count += 1
+                # for each enabled view layer (model)
+                for model in get_models(context.scene.view_layers, props.enabled_view_layers):    
+                    # make relative path string (add model name to path if more than one)
+                    if len(models) > 1:
+                        file_path = '{}/{}/{}/{}'.format(props.render_path, model, anim.name, "render") #TODO: replace render with name of pass
+                    else:
+                        file_path = '{}/{}/{}'.format(props.render_path, anim.name, "render")
+
+                    # Add frame to frames_to_render
+                    self.anims_to_render.append(AnimToRender(anim, model, file_path))
+                    self.full_anim_count += 1
 
         # set render display setting to avoid window popups for each render
         context.preferences.view.render_display_type = 'NONE'
 
         bpy.app.handlers.render_pre.append(self.pre)
-        bpy.app.handlers.render_post.append(self.post)
+        bpy.app.handlers.render_complete.append(self.post)
 
         # The timer gets created and the modal handler
         # is added to the window manager
@@ -445,39 +467,40 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
                                   # and will start the render if available
 
             # If cancelled or no more frames to render, finish.
-            if True in (not self.frames_to_render, context.scene.reliveBatch.render_cancelled is True):
+            if True in (not self.anims_to_render, context.scene.reliveBatch.render_cancelled is True):
 
                 # We remove the handlers and the modal timer to clean everything
                 bpy.app.handlers.render_pre.remove(self.pre)
-                bpy.app.handlers.render_post.remove(self.post)
+                bpy.app.handlers.render_complete.remove(self.post)
                 #bpy.app.handlers.render_cancel.remove(self.cancelled)
                 context.window_manager.event_timer_remove(self._timer)
                 self.finished('CANCELLED' if context.scene.reliveBatch.render_cancelled else 'DONE')
                 return {"CANCELLED" if context.scene.reliveBatch.render_cancelled else "FINISHED"}
 
-            elif self.rendering_frame is False: # Nothing is currently rendering.
+            elif self.rendering_animation is False: # Nothing is currently rendering.
                                           # Proceed to render.
                 sc = context.scene
                 props = sc.reliveBatch
                 
                 # retrieve frame data
-                frame = self.frames_to_render[0]
+                render_anim = self.anims_to_render[0]
 
-                props.current_model = frame.model
-                props.current_anim = frame.name
-                props.current_frame = str(frame.index)
+                props.current_model = render_anim.model
+                props.current_anim = render_anim.meta.name
                 
                 # Apply action
-                apply_action(frame.name)
+                apply_action(render_anim.meta.name)
                 
                 # Set current frame
-                sc.frame_set(frame.index)
+                #sc.frame_set(frame.index)
+                # Set animation duration
+                sc.frame_end = render_anim.meta.frame_count - 1
                 
                 # Set output resolution
-                sc.render.resolution_x = frame.size_w
-                sc.render.resolution_y = frame.size_h
+                sc.render.resolution_x = render_anim.meta.size_w
+                sc.render.resolution_y = render_anim.meta.size_h
 
-                camera_settings = calculate_cam_params(frame.size_w, frame.size_h, frame.offset_x, frame.offset_y)
+                camera_settings = calculate_cam_params(render_anim.meta.size_w, render_anim.meta.size_h, render_anim.meta.offset_x, render_anim.meta.offset_y)
                 
                 # Setup camera position and scale
                 bpy.data.cameras[props.camera_name].ortho_scale = camera_settings.size
@@ -485,10 +508,10 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
                 bpy.data.cameras[props.camera_name].shift_y     = camera_settings.offset_y
 
                 # Set file path
-                sc.render.filepath = '//{}'.format(frame.file_path)
+                sc.render.filepath = '//{}'.format(Path(render_anim.file_path))
 
                 # Render frame
-                bpy.ops.render.render(layer=frame.model, write_still=True)
+                bpy.ops.render.render(animation=True, write_still=False, layer=render_anim.model)
 
         return {"PASS_THROUGH"}
 
@@ -497,8 +520,8 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
         props = scene.reliveBatch
 
         # RESET FRAME VARIABLES
-        self.frames_to_render = []
-        self.full_frame_count = 0
+        self.anims_to_render = []
+        self.full_anim_count = 0
 
         self.missing_actions = []
         
@@ -508,10 +531,9 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
         # RESET ANIMATION
         scene.objects[props.rig_name].animation_data.action = bpy.data.actions[self.previous_action.name]
         
-        # RESET FRAME 
-        # causes crash :(
-        #scene.frame_set(0)
-        
+        # RESET DURATION
+        scene.frame_end = self.previous_frame_end
+
         # RESET RESOLUTION
         scene.render.resolution_x = self.previous_resolution_x
         scene.render.resolution_y = self.previous_resolution_y
@@ -525,13 +547,12 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
         
         props.current_model = ""
         props.current_anim = ""
-        props.current_frame = ""
         
         props.is_batch_rendering = False
         props.render_cancelled = False
         props.batch_render_status = status
 
-        self.rendering_frame = False
+        self.rendering_animation = False
 
 # == PANELS
 
@@ -607,7 +628,6 @@ class ReliveBatchRendererRenderPanel(ReliveBatchRendererPanel, bpy.types.Panel):
         if props.is_batch_rendering:
             col.label(text="Model: " + props.current_model)
             col.label(text="Anim: " + props.current_anim)
-            col.label(text="Frame: " + props.current_frame)
             
 class ReliveBatchRendererModelsPanel(ReliveBatchRendererPanel, bpy.types.Panel):
     bl_idname = "VIEW3D_PT_batch_renderer_models"
