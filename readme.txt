@@ -32,14 +32,12 @@ RENDERING SPRITES (Step 1-4 same as above):
 (4) If the .blend file is not in the "hd" folder,
     set "Extracted sprites folder" to the relative path
     of the "sprites" folder mentioned before
-(5) In the "Render Sprites" section, set your output path.
+(5) In the "Render Sprites" section, set a filter, (* for all animations) and set your output path.
     If you want to render directly into the sprites folder,
     just set it to the same path as "Extracted sprites folder".
 (6) In the "Settings" section, you can choose preset models,
     or manually select which view layers to render.
 (7) Just press the "BATCH RENDER" button to start rendering.
 
-If you only want to render select animations, set the "Extracted sprites folder"
-path to a new empty folder, then copy any folders like "Mudokon_Speak1", "Slig_PullLever" etc.
-from the "hd/sprites" folder into the new folder. It will only render sprites for those animations.
-(If they each contain a meta.json file and there is a corresponding Action in the .blend file, that is)
+You can also specify a "Render pass name". This will be appended to the name of each exported file.
+If you write "emissive", it will also disable transparency and hide the "Lights" collection.
