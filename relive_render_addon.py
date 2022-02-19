@@ -77,8 +77,8 @@ class ReliveBatchProperties(bpy.types.PropertyGroup):
     )
 
     # FILE PATHS
-    render_path : bpy.props.StringProperty(name='Render Path', default='renders', description="Renders will be saved to this path (relative to .blend file)")
-    ref_sprite_path : bpy.props.StringProperty(name='Reference Sprites Path', default='sprites', description="Sprites will be loaded from this path (relative to .blend file)")
+    render_path : bpy.props.StringProperty(name='Render Path', default='renders', description="Renders will be saved to this path (relative to .blend file)\nWith multiple viewlayers selected, extra folders named after each model will be between this path and the sprite folders")
+    ref_sprite_path : bpy.props.StringProperty(name='Reference Sprites Path', default='sprites', description="Sprites will be loaded from this path (relative to .blend file)\nWhen rendering animations, this path will also be used to check which animations exist, and their data (meta.json)")
     
     # Filters
     ref_sprite_filter : bpy.props.StringProperty(name='Reference Sprite filter', default='Mudokon*', description="Only animations that match the filter will be imported")
@@ -92,7 +92,7 @@ class ReliveBatchProperties(bpy.types.PropertyGroup):
 
     enabled_view_layers : bpy.props.BoolVectorProperty(
         name = "ViewLayers",
-        description = "Which models (ViewLayers) to include passes of when rendering",
+        description = "Which models (ViewLayers) to include when rendering",
         size = 32,
     )
 
@@ -734,26 +734,30 @@ class ReliveBatchRendererModelsPanel(ReliveBatchRendererPanel, bpy.types.Panel):
         vl_right.label(text="({}/{})".format(enabled_view_layer_count, len(context.scene.view_layers)))
         
         box = col.box()
+        split = box.split(factor=0.5)
+        col_1 = split.column()
+        col_2 = split.column()
         for i, model in enumerate(context.scene.view_layers):
-            box.row().prop(props, "enabled_view_layers", index=i, text=model.name)
+            next = col_1 if i < len(context.scene.view_layers) / 2 else col_2
+            next.prop(props, "enabled_view_layers", index=i, text=model.name)
 
         # PRESETS
         col.label(text="Presets: (not that useful atm)")
         col.row().prop(props, "character_type", text='')
 
         if props.character_type == 'mud':
-            col.row().operator('opr.set_batch_view_layers', text='All models').preset = 'mud_all_models'
+        #    col.row().operator('opr.set_batch_view_layers', text='All models').preset = 'mud_all_models'
             
-            row1 = col.row()
-            row1.operator('opr.set_batch_view_layers', text='All (Game)').preset = 'mud_game'
-            row1.operator('opr.set_batch_view_layers', text='All (FMV)').preset = 'mud_fmv'
+        #    row1 = col.row()
+        #    row1.operator('opr.set_batch_view_layers', text='All (Game)').preset = 'mud_game'
+        #    row1.operator('opr.set_batch_view_layers', text='All (FMV)').preset = 'mud_fmv'
 
             row2 = col.row()
             row2.operator('opr.set_batch_view_layers', text='Abe (Game)').preset = 'mud_abe_game'
             row2.operator('opr.set_batch_view_layers', text='Abe (FMV)').preset = 'mud_abe_fmv'
 
-        elif props.character_type == 'slig':
-            col.row().operator('opr.set_batch_view_layers', text='All models').preset = 'slig_all_models'
+        #elif props.character_type == 'slig':
+        #    col.row().operator('opr.set_batch_view_layers', text='All models').preset = 'slig_all_models'
 
         #elif props.character_type == 'gluk':
             #col.row().operator('opr.set_batch_view_layers', text='All models').preset = 'gluk_all_models'
