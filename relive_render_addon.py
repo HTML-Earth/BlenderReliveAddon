@@ -4,7 +4,7 @@ bl_info = {
     'blender': (2, 93, 0),
     'category': 'Render',
     # optional
-    'version': (0, 9, 3),
+    'version': (0, 9, 4),
     'author': 'HTML_Earth',
     'description': 'A tool to render HD sprites for RELIVE',
 }
@@ -146,6 +146,13 @@ def get_models(view_layers, enabled_view_layers):
         if enabled_view_layers[i] == True:
             models.append(model.name)
     return models
+
+def get_enabled_view_layer_count(context):
+    enabled_view_layer_count = 0
+    for i, model in enumerate(context.scene.view_layers):
+        if context.scene.reliveBatch.enabled_view_layers[i]:
+            enabled_view_layer_count += 1
+    return enabled_view_layer_count
 
 def get_action(action_name):
     # Check all available actions
@@ -512,7 +519,7 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
                 bpy.app.handlers.render_complete.remove(self.post)
                 #bpy.app.handlers.render_cancel.remove(self.cancelled)
                 context.window_manager.event_timer_remove(self._timer)
-                self.finished('CANCELLED' if context.scene.reliveBatch.render_cancelled else 'DONE')
+                self.finished(msg_cancelled if context.scene.reliveBatch.render_cancelled else msg_done)
                 return {"CANCELLED" if context.scene.reliveBatch.render_cancelled else "FINISHED"}
 
             elif self.rendering_animation is False: # Nothing is currently rendering.
@@ -664,22 +671,34 @@ class ReliveBatchRendererRenderPanel(ReliveBatchRendererPanel, bpy.types.Panel):
         col.label(text="Output path:")
         col.row().prop(props, "render_path", text='')
 
-        # Render status
-        col.label(text=props.batch_render_status)
 
+        # Infobox
+        infobox = col.box()
+        infobox.enabled = False
+        
         # Render/Cancel button
         button_row = col.row()
+
         if props.is_batch_rendering:
+            # Status
+            infobox.label(text=props.batch_render_status)
+            infobox.label(text="Model: " + props.current_model)
+            infobox.label(text="Anim: " + props.current_anim)
+
             button_row.operator('opr.batch_cancel_operator', text='CANCEL BATCH')
             if props.render_cancelled:
                 button_row.enabled = False
+
         else:
+            vl_count = get_enabled_view_layer_count(context)
+
+            # Status
+            status_text = "READY" if vl_count > 0 else "NO VIEWLAYER"
+            infobox.label(text=status_text)
+
+            button_row.enabled = vl_count > 0
             button_row.operator('opr.batch_renderer_operator', text='BATCH RENDER')
 
-        # Current render progress
-        if props.is_batch_rendering:
-            col.label(text="Model: " + props.current_model)
-            col.label(text="Anim: " + props.current_anim)
             
 class ReliveBatchRendererModelsPanel(ReliveBatchRendererPanel, bpy.types.Panel):
     bl_idname = "VIEW3D_PT_batch_renderer_models"
@@ -692,12 +711,22 @@ class ReliveBatchRendererModelsPanel(ReliveBatchRendererPanel, bpy.types.Panel):
         
         col.row().label(text='Render pass name:')
         col.row().prop(props, "pass_to_use", text='')
+        
+        # VIEW LAYERS
+        enabled_view_layer_count = get_enabled_view_layer_count(context)
+        vl_header = col.row()
+        vl_left = vl_header.column()
+        vl_right = vl_header.column()
+        vl_right.alignment = "RIGHT"
 
-        col.label(text="View Layers:")
+        vl_left.label(text="View Layers:")
+        vl_right.label(text="({}/{})".format(enabled_view_layer_count, len(context.scene.view_layers)))
+        
         box = col.box()
         for i, model in enumerate(context.scene.view_layers):
             box.row().prop(props, "enabled_view_layers", index=i, text=model.name)
 
+        # PRESETS
         col.label(text="Presets: (not that useful atm)")
         col.row().prop(props, "character_type", text='')
 
