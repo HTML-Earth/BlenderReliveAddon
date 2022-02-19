@@ -1,7 +1,7 @@
 bl_info = {
     # required
     'name': 'Batch Renderer for RELIVE',
-    'blender': (2, 93, 0),
+    'blender': (3, 0, 0),
     'category': 'Render',
     # optional
     'version': (0, 9, 4),
@@ -83,6 +83,9 @@ class ReliveBatchProperties(bpy.types.PropertyGroup):
     # Filters
     ref_sprite_filter : bpy.props.StringProperty(name='Reference Sprite filter', default='Mudokon*', description="Only animations that match the filter will be imported")
     animation_filter : bpy.props.StringProperty(name='Exported animation filter', default='*', description="Only animations that match the filter will be rendered")
+
+    # Resolution %
+    resolution_percent : bpy.props.IntProperty(name="% Resolution", subtype="PERCENTAGE", default = 300, min = 100, max = 1000)
 
     # Pass
     pass_to_use : bpy.props.StringProperty(name='Render pass to use', default='', description="This will be appended to the exported filenames (Leave empty for default)\n\n'emissive' - turns off transparency and hides the light collection")
@@ -405,6 +408,7 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
         # save old resolution
         self.previous_resolution_x = context.scene.render.resolution_x
         self.previous_resolution_y = context.scene.render.resolution_y
+        self.previous_resolution_percentage = context.scene.render.resolution_percentage
         
         # save old camera settings
         self.previous_camera_scale = bpy.data.cameras[props.camera_name].ortho_scale
@@ -466,6 +470,10 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
                 self.report({"ERROR"}, "Could not find lights collection to hide.")
                 self.finished("Check Misc./Lights")
                 return {"CANCELLED"}
+
+        
+        # Set custom resolution %
+        context.scene.render.resolution_percentage = props.resolution_percent
 
         for anim in animations:
                 
@@ -582,6 +590,7 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
         # RESET RESOLUTION
         scene.render.resolution_x = self.previous_resolution_x
         scene.render.resolution_y = self.previous_resolution_y
+        scene.render.resolution_percentage = self.previous_resolution_percentage
         
         # RESET CAMERA
         bpy.data.cameras[props.camera_name].ortho_scale = self.previous_camera_scale
@@ -708,6 +717,8 @@ class ReliveBatchRendererModelsPanel(ReliveBatchRendererPanel, bpy.types.Panel):
     def draw(self, context):
         props = context.scene.reliveBatch
         col = self.layout.column()
+
+        col.row().prop(props, "resolution_percent")
         
         col.row().label(text='Render pass name:')
         col.row().prop(props, "pass_to_use", text='')
