@@ -4,7 +4,7 @@ bl_info = {
     'blender': (3, 0, 0),
     'category': 'Render',
     # optional
-    'version': (0, 9, 4),
+    'version': (0, 9, 5),
     'author': 'HTML_Earth',
     'description': 'A tool to render HD sprites for RELIVE',
 }
@@ -85,10 +85,10 @@ class ReliveBatchProperties(bpy.types.PropertyGroup):
     animation_filter : bpy.props.StringProperty(name='Exported animation filter', default='*', description="Only animations that match the filter will be rendered")
 
     # Resolution %
-    resolution_percent : bpy.props.IntProperty(name="% Resolution", subtype="PERCENTAGE", default = 300, min = 100, max = 1000)
+    resolution_percent : bpy.props.IntProperty(name="% Resolution", subtype="PERCENTAGE", default = 300, min = 100, max = 1000, description="How big the final render should be compared to the reference sprite")
 
     # Pass
-    pass_to_use : bpy.props.StringProperty(name='Render pass to use', default='', description="This will be appended to the exported filenames (Leave empty for default)\n\n'emissive' - turns off transparency and hides the light collection")
+    pass_to_use : bpy.props.StringProperty(name='Render pass to use', default='', description="This will be appended to the exported filenames (Leave empty for default)\n\n'emissive' - turns off transparency and hides the light collection\n(it is possible to combine it with other names as long as it comes last.\nFor example 'flipped_emissive' will still work)")
 
     enabled_view_layers : bpy.props.BoolVectorProperty(
         name = "ViewLayers",
@@ -96,12 +96,18 @@ class ReliveBatchProperties(bpy.types.PropertyGroup):
         size = 32,
     )
 
+    # Utilities
+    ref_width : bpy.props.IntProperty(name="Width", subtype="PIXEL", default = 640, min = 1, max = 1920, description="Width of your reference sprite")
+    ref_height : bpy.props.IntProperty(name="Height", subtype="PIXEL", default = 480, min = 1, max = 1080, description="Height of your reference sprite")
+    ref_offset_x : bpy.props.IntProperty(name="Offset X", subtype="PIXEL", default = 0, min = -2048, max = 2048, description="X offset of your reference sprite")
+    ref_offset_y : bpy.props.IntProperty(name="Offset Y", subtype="PIXEL", default = 0, min = -2048, max = 2048, description="Y offset of your reference sprite")
+
     # CSV
     use_custom_csv : bpy.props.BoolProperty(name='Use custom CSV', default=False, description="Instead of using the default CSV file for the selected character, use a custom path")
     custom_csv_path : bpy.props.StringProperty(name='CSV File', default='debug.csv', description="Path to CSV file containing animation info")
 
     # SCENE REFS
-    camera_name : bpy.props.StringProperty(name='Camera', default='Camera', description="The name of the main camera used to render")
+    camera_name : bpy.props.StringProperty(name='Camera', default='Camera', description="The name of the camera object used to render")
     rig_name : bpy.props.StringProperty(name='Rig', default='rig', description="The name of the main character rig")
     lights_collection : bpy.props.StringProperty(name='Lights', default='Lights', description="The name of the collection containing all lights")
 
@@ -207,7 +213,9 @@ def calculate_cam_params(size_w, size_h, offset_x, offset_y):
 class ReliveImportReferencesOperator(bpy.types.Operator):
     
     bl_idname = 'opr.import_reference_sprites_operator'
-    bl_label = 'Reference Sprite Importer'
+    bl_label = 'RELIVE: Import sprites'
+    bl_description = "Imports all sprite animations that match the filter into a new collection.\nThe collection is automatically set to not be selectable.\nEach reference will be positioned and scaled depending on the info in its meta.json file.\nAll reference images will be facing the -X axis"
+    bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
         props = context.scene.reliveBatch
@@ -264,87 +272,11 @@ class ReliveImportReferencesOperator(bpy.types.Operator):
 
         return {"FINISHED"}
 
-class ReliveSetModelsOperator(bpy.types.Operator):
-    
-    bl_idname = 'opr.set_batch_view_layers'
-    bl_label = 'Batch Renderer View Layer Setter-Upper'
-
-    preset: bpy.props.EnumProperty(
-        items=[
-            ('mud_all_models', 'mud_all_models', ''),
-            ('mud_game', 'mud_game', ''),
-            ('mud_fmv', 'mud_fmv', ''),
-            ('mud_abe_game', 'mud_abe_game', ''),
-            ('mud_abe_fmv', 'mud_abe_fmv', ''),
-
-            ('slig_all_models', 'slig_all_models', ''),
-
-            ('gluk_all_models', 'gluk_all_models', ''),
-            ('gluk_rf_exec_fmv_green', 'gluk_rf_exec_fmv_green', ''),
-            ('gluk_rf_exec_fmv_all', 'gluk_rf_exec_fmv_all', ''),
-            ('gluk_jr_exec_game', 'gluk_jr_exec_game', ''),
-            ('gluk_aslik_fmv', 'gluk_aslik_fmv', ''),
-            ('gluk_dripik_fmv', 'gluk_dripik_fmv', ''),
-            ('gluk_menu_dripik', 'gluk_menu_dripik', ''),
-        ]
-    )
-
-    def execute(self, context):
-        layer_bools = context.scene.reliveBatch.enabled_view_layers
-        layers = context.scene.view_layers
-
-        if self.preset == 'mud_all_models':
-            preset = mud_all_models
-        elif self.preset == 'mud_game':
-            preset = mud_game
-        elif self.preset == 'mud_fmv':
-            preset = mud_fmv
-        elif self.preset == 'mud_abe_game':
-            preset = mud_abe_game
-        elif self.preset == 'mud_abe_fmv':
-            preset = mud_abe_fmv
-        elif self.preset == 'slig_all_models':
-            preset = slig_all_models
-        elif self.preset == 'gluk_all_models':
-            preset = gluk_all_models
-        elif self.preset == 'gluk_rf_exec_fmv_green':
-            preset = gluk_rf_exec_fmv_green
-        elif self.preset == 'gluk_rf_exec_fmv_all':
-            preset = gluk_rf_exec_fmv_all
-        elif self.preset == 'gluk_jr_exec_game':
-            preset = gluk_jr_exec_game
-        elif self.preset == 'gluk_aslik_fmv':
-            preset = gluk_aslik_fmv
-        elif self.preset == 'gluk_dripik_fmv':
-            preset = gluk_dripik_fmv
-        elif self.preset == 'gluk_menu_dripik':
-            preset = gluk_menu_dripik
-        else:
-            preset = []
-
-        for i, checkbox in enumerate(layer_bools):
-            if i < len(layers):
-                layer_bools[i] = layers[i].name in preset
-            else:
-                layer_bools[i] = False
-
-        return {"FINISHED"}
-
-class ReliveBatchCancelOperator(bpy.types.Operator):
-    
-    bl_idname = 'opr.batch_cancel_operator'
-    bl_label = 'Batch Renderer Canceller'
-
-    def execute(self, context):
-        print("Cancelling...")
-        context.scene.reliveBatch.batch_render_status = msg_cancelling
-        context.scene.reliveBatch.render_cancelled = True
-        return {"FINISHED"}
-
 class ReliveBatchRenderOperator(bpy.types.Operator):
     
     bl_idname = 'opr.batch_renderer_operator'
-    bl_label = 'Batch Renderer'
+    bl_label = 'RELIVE: Start batch render'
+    bl_description = "Starts a batch render"
     
     full_anim_count = 0
 
@@ -411,8 +343,8 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
         self.previous_resolution_percentage = context.scene.render.resolution_percentage
         
         # save old camera settings
-        self.previous_camera_scale = bpy.data.cameras[props.camera_name].ortho_scale
-        self.previous_camera_y_pos = bpy.data.cameras[props.camera_name].shift_y
+        self.previous_camera_scale = bpy.data.objects[props.camera_name].data.ortho_scale
+        self.previous_camera_y_pos = bpy.data.objects[props.camera_name].data.shift_y
 
         # save old render path
         self.previous_render_path = context.scene.render.filepath
@@ -447,9 +379,9 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
 
         # Set BG to transparent if pass is not emissive
         self.previous_bg_transparent = context.scene.render.film_transparent
-        context.scene.render.film_transparent = props.current_pass != emissive_pass_name
+        context.scene.render.film_transparent = not props.current_pass.endswith(emissive_pass_name)
         
-        if props.current_pass == emissive_pass_name:
+        if props.current_pass.endswith(emissive_pass_name):
             try:
                 self.previous_lights_should_be_hidden = {}
 
@@ -488,8 +420,6 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
                     self.missing_actions.append(anim.name)
                     continue
                 
-                #for i in range(anim.frame_count):
-
                 # for each enabled view layer (model)
                 for model in get_models(context.scene.view_layers, props.enabled_view_layers):
                     # make relative path string (add model name to path if more than one)
@@ -544,8 +474,6 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
                 # Apply action
                 apply_action(render_anim.meta.name)
                 
-                # Set current frame
-                #sc.frame_set(frame.index)
                 # Set animation duration
                 sc.frame_end = render_anim.meta.frame_count - 1
                 
@@ -556,9 +484,9 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
                 camera_settings = calculate_cam_params(render_anim.meta.size_w, render_anim.meta.size_h, render_anim.meta.offset_x, render_anim.meta.offset_y)
                 
                 # Setup camera position and scale
-                bpy.data.cameras[props.camera_name].ortho_scale = camera_settings.size
-                bpy.data.cameras[props.camera_name].shift_x     = camera_settings.offset_x
-                bpy.data.cameras[props.camera_name].shift_y     = camera_settings.offset_y
+                bpy.data.objects[props.camera_name].data.ortho_scale = camera_settings.size
+                bpy.data.objects[props.camera_name].data.shift_x     = camera_settings.offset_x
+                bpy.data.objects[props.camera_name].data.shift_y     = camera_settings.offset_y
 
                 # Set file path
                 sc.render.filepath = '//{}'.format(Path(render_anim.file_path))
@@ -593,8 +521,8 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
         scene.render.resolution_percentage = self.previous_resolution_percentage
         
         # RESET CAMERA
-        bpy.data.cameras[props.camera_name].ortho_scale = self.previous_camera_scale
-        bpy.data.cameras[props.camera_name].shift_y     = self.previous_camera_y_pos
+        bpy.data.objects[props.camera_name].data.ortho_scale = self.previous_camera_scale
+        bpy.data.objects[props.camera_name].data.shift_y     = self.previous_camera_y_pos
 
         # RESET RENDER DISPLAY SETTING
         bpy.context.preferences.view.render_display_type = self.previous_render_display_type
@@ -603,7 +531,7 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
         scene.render.film_transparent = self.previous_bg_transparent
 
         # RESET LIGHTS COLLECTION RENDERABILITY
-        if props.current_pass == emissive_pass_name:
+        if props.current_pass.endswith(emissive_pass_name):
             try:
                 # go through all view layers
                 for model in get_models(scene.view_layers, props.enabled_view_layers):
@@ -621,6 +549,147 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
         props.batch_render_status = status
 
         self.rendering_animation = False
+
+class ReliveBatchCancelOperator(bpy.types.Operator):
+    
+    bl_idname = 'opr.batch_cancel_operator'
+    bl_label = 'RELIVE: Cancel batch render'
+    bl_description = "Cancels the current batch render"
+
+    def execute(self, context):
+        print("Cancelling...")
+        context.scene.reliveBatch.batch_render_status = msg_cancelling
+        context.scene.reliveBatch.render_cancelled = True
+        return {"FINISHED"}
+
+class ReliveSetModelsOperator(bpy.types.Operator):
+    
+    bl_idname = 'opr.set_batch_view_layers'
+    bl_label = 'RELIVE: Apply view layer preset'
+    bl_description = "Changes which view layers will be used for the next batch render"
+
+    preset: bpy.props.EnumProperty(
+        items=[
+            ('mud_all_models', 'mud_all_models', ''),
+            ('mud_game', 'mud_game', ''),
+            ('mud_fmv', 'mud_fmv', ''),
+            ('mud_abe_game', 'mud_abe_game', ''),
+            ('mud_abe_fmv', 'mud_abe_fmv', ''),
+
+            ('slig_all_models', 'slig_all_models', ''),
+
+            ('gluk_all_models', 'gluk_all_models', ''),
+            ('gluk_rf_exec_fmv_green', 'gluk_rf_exec_fmv_green', ''),
+            ('gluk_rf_exec_fmv_all', 'gluk_rf_exec_fmv_all', ''),
+            ('gluk_jr_exec_game', 'gluk_jr_exec_game', ''),
+            ('gluk_aslik_fmv', 'gluk_aslik_fmv', ''),
+            ('gluk_dripik_fmv', 'gluk_dripik_fmv', ''),
+            ('gluk_menu_dripik', 'gluk_menu_dripik', ''),
+        ]
+    )
+
+    def execute(self, context):
+        layer_bools = context.scene.reliveBatch.enabled_view_layers
+        layers = context.scene.view_layers
+
+        if self.preset == 'mud_all_models':
+            preset = mud_all_models
+        elif self.preset == 'mud_game':
+            preset = mud_game
+        elif self.preset == 'mud_fmv':
+            preset = mud_fmv
+        elif self.preset == 'mud_abe_game':
+            preset = mud_abe_game
+        elif self.preset == 'mud_abe_fmv':
+            preset = mud_abe_fmv
+        elif self.preset == 'slig_all_models':
+            preset = slig_all_models
+        elif self.preset == 'gluk_all_models':
+            preset = gluk_all_models
+        elif self.preset == 'gluk_rf_exec_fmv_green':
+            preset = gluk_rf_exec_fmv_green
+        elif self.preset == 'gluk_rf_exec_fmv_all':
+            preset = gluk_rf_exec_fmv_all
+        elif self.preset == 'gluk_jr_exec_game':
+            preset = gluk_jr_exec_game
+        elif self.preset == 'gluk_aslik_fmv':
+            preset = gluk_aslik_fmv
+        elif self.preset == 'gluk_dripik_fmv':
+            preset = gluk_dripik_fmv
+        elif self.preset == 'gluk_menu_dripik':
+            preset = gluk_menu_dripik
+        else:
+            preset = []
+
+        for i, checkbox in enumerate(layer_bools):
+            if i < len(layers):
+                layer_bools[i] = layers[i].name in preset
+            else:
+                layer_bools[i] = False
+
+        return {"FINISHED"}
+
+class ReliveSetupCameraOperator(bpy.types.Operator):
+    
+    bl_idname = 'opr.setup_cam_operator'
+    bl_label = 'RELIVE: Setup camera'
+    bl_description = "Positions the camera at (-5,0,0) and makes it point in the direction of +X.\nAlso sets it to orthographic and makes its scale and offset match the given sprite info\n(Uses the camera referenced in the Scene panel above)"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        props = context.scene.reliveBatch
+
+        # position
+        bpy.data.objects[props.camera_name].location[0] = -5
+        bpy.data.objects[props.camera_name].location[1] = 0
+        bpy.data.objects[props.camera_name].location[2] = 0
+
+        # rotation
+        bpy.context.object.rotation_euler[0] = 1.5708
+        bpy.context.object.rotation_euler[1] = 0
+        bpy.context.object.rotation_euler[2] = -1.5708
+
+        # orthographic
+        bpy.data.objects[props.camera_name].data.type = 'ORTHO'
+
+        # scale and offset
+        camera_settings = calculate_cam_params(props.ref_width, props.ref_height, props.ref_offset_x, props.ref_offset_y)
+        bpy.data.objects[props.camera_name].data.ortho_scale = camera_settings.size
+        bpy.data.objects[props.camera_name].data.shift_x     = camera_settings.offset_x
+        bpy.data.objects[props.camera_name].data.shift_y     = camera_settings.offset_y
+        
+        return {"FINISHED"}
+
+class ReliveFlipVertexGroupsOperator(bpy.types.Operator):
+    
+    bl_idname = 'opr.flip_vert_groups_operator'
+    bl_label = 'RELIVE: Flip vertex groups'
+    bl_description = "Flips the active model's vertex group names.\n(L at the end becomes R and vice versa)\nShould work fine as long as none of them are ALL CAPS or have a '\\' at the end"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        temp_str = "\\"
+
+        try:
+            for v_g in bpy.context.active_object.vertex_groups:
+                if v_g.name.endswith('L'):
+                    v_g.name = v_g.name + temp_str
+                elif v_g.name.endswith('R'):
+                    v_g.name = v_g.name + temp_str
+                else:
+                    continue
+
+            for v_g in bpy.context.active_object.vertex_groups:
+                if v_g.name.endswith('L' + temp_str):
+                    v_g.name = v_g.name.split('L' + temp_str)[0] + 'R'
+                elif v_g.name.endswith('R' + temp_str):
+                    v_g.name = v_g.name.split('R' + temp_str)[0] + 'L'
+                else:
+                    continue
+        except:
+            print("Something went wrong when trying to rename vertex groups")
+        
+        return {"FINISHED"}
 
 # == PANELS
 
@@ -653,7 +722,7 @@ class ReliveBatchRendererMainPanel(ReliveBatchRendererPanel, bpy.types.Panel):
 class ReliveBatchRendererReferencesPanel(ReliveBatchRendererPanel, bpy.types.Panel):
     bl_idname = "VIEW3D_PT_batch_renderer_references"
     bl_parent_id = "VIEW3D_PT_batch_renderer"
-    bl_label = "Import Sprites"
+    bl_label = "Import"
 
     def draw(self, context):
         props = context.scene.reliveBatch
@@ -667,7 +736,7 @@ class ReliveBatchRendererReferencesPanel(ReliveBatchRendererPanel, bpy.types.Pan
 class ReliveBatchRendererRenderPanel(ReliveBatchRendererPanel, bpy.types.Panel):
     bl_idname = "VIEW3D_PT_batch_renderer_render"
     bl_parent_id = "VIEW3D_PT_batch_renderer"
-    bl_label = "Render Sprites"
+    bl_label = "Render"
 
     def draw(self, context):
         props = context.scene.reliveBatch
@@ -708,11 +777,10 @@ class ReliveBatchRendererRenderPanel(ReliveBatchRendererPanel, bpy.types.Panel):
             button_row.enabled = vl_count > 0
             button_row.operator('opr.batch_renderer_operator', text='BATCH RENDER')
 
-            
 class ReliveBatchRendererModelsPanel(ReliveBatchRendererPanel, bpy.types.Panel):
     bl_idname = "VIEW3D_PT_batch_renderer_models"
     bl_parent_id = "VIEW3D_PT_batch_renderer"
-    bl_label = "Settings"
+    bl_label = "Settings (Render)"
 
     def draw(self, context):
         props = context.scene.reliveBatch
@@ -773,7 +841,7 @@ class ReliveBatchRendererModelsPanel(ReliveBatchRendererPanel, bpy.types.Panel):
 class ReliveBatchRendererSettingsPanel(ReliveBatchRendererPanel, bpy.types.Panel):
     bl_idname = "VIEW3D_PT_batch_renderer_settings"
     bl_parent_id = "VIEW3D_PT_batch_renderer"
-    bl_label = "Misc."
+    bl_label = "Scene"
     bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context):
@@ -794,21 +862,58 @@ class ReliveBatchRendererSettingsPanel(ReliveBatchRendererPanel, bpy.types.Panel
         col_1.label(text='Lights')
         col_2.row().prop(props, "lights_collection", text='')
 
+class ReliveBatchRendererUtilitiesPanel(ReliveBatchRendererPanel, bpy.types.Panel):
+    bl_idname = "VIEW3D_PT_batch_renderer_utilities"
+    bl_parent_id = "VIEW3D_PT_batch_renderer"
+    bl_label = "Utilities"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        props = context.scene.reliveBatch
+        col = self.layout.column()
+        
+
+        box_setup = col.box()
+        box_setup.row().label(text='For setting up new files:')
+        box_setup.row().operator('opr.setup_cam_operator', text='Setup camera')
+
+        split = box_setup.split(factor=0.3)
+        col_1 = split.column()
+        col_2 = split.column()
+
+        col_1.label(text='Width')
+        col_2.row().prop(props, "ref_width", text='')
+        col_1.label(text='Height')
+        col_2.row().prop(props, "ref_height", text='')
+
+        col_1.label(text='Offset X')
+        col_2.row().prop(props, "ref_offset_x", text='')
+        col_1.label(text='Offset Y')
+        col_2.row().prop(props, "ref_offset_y", text='')
+
+
+        box_flip = col.box()
+        box_flip.row().label(text='For making flipped models:')
+        box_flip.row().operator('opr.flip_vert_groups_operator', text='Flip vertex groups')
+
 # == MAIN ROUTINE
 
 CLASSES = [
     ReliveBatchProperties,
     
     ReliveImportReferencesOperator,
-    ReliveSetModelsOperator,
     ReliveBatchRenderOperator,
     ReliveBatchCancelOperator,
+    ReliveSetModelsOperator,
+    ReliveSetupCameraOperator,
+    ReliveFlipVertexGroupsOperator,
 
     ReliveBatchRendererMainPanel,
     ReliveBatchRendererReferencesPanel,
     ReliveBatchRendererRenderPanel,
     ReliveBatchRendererModelsPanel,
     ReliveBatchRendererSettingsPanel,
+    ReliveBatchRendererUtilitiesPanel
 ]
 
 def register():
