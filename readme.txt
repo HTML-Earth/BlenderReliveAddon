@@ -40,4 +40,4 @@ RENDERING SPRITES (Step 1-4 same as above):
 (7) Just press the "BATCH RENDER" button to start rendering.
 
 You can also specify a "Render pass name". This will be appended to the name of each exported file.
-If you write "emissive", it will also disable transparency and hide the "Lights" collection.
+If it ends with "emissive", it will also disable transparency and hide the "Lights" collection.
