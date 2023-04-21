@@ -4,7 +4,7 @@ bl_info = {
     'blender': (3, 0, 0),
     'category': 'Render',
     # optional
-    'version': (0, 9, 5),
+    'version': (0, 9, 6),
     'author': 'HTML_Earth',
     'description': 'A tool to render HD sprites for RELIVE',
 }
@@ -77,8 +77,9 @@ class ReliveBatchProperties(bpy.types.PropertyGroup):
     )
 
     # FILE PATHS
-    render_path : bpy.props.StringProperty(name='Render Path', default='renders', description="Renders will be saved to this path (relative to .blend file)\nWith multiple viewlayers selected, extra folders named after each model will be between this path and the sprite folders")
-    ref_sprite_path : bpy.props.StringProperty(name='Reference Sprites Path', default='sprites', description="Sprites will be loaded from this path (relative to .blend file)\nWhen rendering animations, this path will also be used to check which animations exist, and their data (meta.json)")
+    render_path : bpy.props.StringProperty(name='Render Path', default='renders', description="Renders will be saved to this path\nDue to technical limitations, this path has to be relative to the .blend file (Add '../' to the path to go up one folder)\nWith multiple viewlayers selected, extra folders named after each model will be between this path and the sprite folders")
+    ref_sprite_path : bpy.props.StringProperty(name='Reference Sprites Path', default='sprites', description="Sprites will be loaded from this path\nWhen rendering animations, this path will also be used to check which animations exist, and their data (meta.json)")
+    use_relative_ref_sprite_path : bpy.props.BoolProperty(name='Use Relative Reference Sprites Path', default=True, description="The sprite path will be treated as relative path from the blend file location\nIf disabled, you need to specify the full path, including the drive letter\n(All this really does is add '//' to the beginning of the path)")
     
     # Filters
     ref_sprite_filter : bpy.props.StringProperty(name='Reference Sprite filter', default='Mudokon*', description="Only animations that match the filter will be imported")
@@ -221,11 +222,25 @@ class ReliveImportReferencesOperator(bpy.types.Operator):
         props = context.scene.reliveBatch
 
         print("Importing reference sprites...")
+        
+        relative_string = ""
+        if props.use_relative_ref_sprite_path:
+            relative_string = "//"
+            if ":" in props.ref_sprite_path:
+                self.report({"ERROR"}, "Relative sprite paths cannot start with a drive letter")
+                return {"CANCELLED"}
+        else:
+            if ":" not in props.ref_sprite_path:
+                self.report({"ERROR"}, "Absolute sprite paths should start with a drive letter (e.g. 'C:')")
+                return {"CANCELLED"}
 
         try:
             anims = get_anims(props.ref_sprite_path, props.ref_sprite_filter)
-        except EnvironmentError: # parent of IOError, OSError *and* WindowsError where available
-            self.report({"ERROR"}, "Sprite path is invalid")
+        except FileNotFoundError as not_found:
+            self.report({"ERROR"}, "Sprite path is invalid (" + not_found.strerror + ": " + not_found.filename + ")")
+            return {"CANCELLED"}
+        except EnvironmentError as env_error: # parent of IOError, OSError *and* WindowsError where available
+            self.report({"ERROR"}, "Sprite path is invalid (EnvironmentError: " + env_error.strerror + ")")
             return {"CANCELLED"}
 
         # Create ref collections
@@ -237,7 +252,10 @@ class ReliveImportReferencesOperator(bpy.types.Operator):
         # Add all reference image sequences
         for anim in anims:
             # load image and set to sequence
-            img = bpy.data.images.load("//" + props.ref_sprite_path + "/" + anim.name + "/0.png")
+            relative_string = ""
+            if props.use_relative_ref_sprite_path:
+                relative_string = "//"
+            img = bpy.data.images.load(relative_string + props.ref_sprite_path + "/" + anim.name + "/0.png")
             img.name = anim.name
             img.source = 'SEQUENCE'
 
@@ -718,6 +736,7 @@ class ReliveBatchRendererMainPanel(ReliveBatchRendererPanel, bpy.types.Panel):
         box = col.box()
         box.row().label(text='Extracted sprites folder:')
         box.row().prop(props, "ref_sprite_path", text='')
+        box.row().prop(props, "use_relative_ref_sprite_path", text="Use relative path")
 
 class ReliveBatchRendererReferencesPanel(ReliveBatchRendererPanel, bpy.types.Panel):
     bl_idname = "VIEW3D_PT_batch_renderer_references"
@@ -746,7 +765,7 @@ class ReliveBatchRendererRenderPanel(ReliveBatchRendererPanel, bpy.types.Panel):
         col.row().label(text='Filter:')
         col.row().prop(props, "animation_filter", text='')
 
-        col.label(text="Output path:")
+        col.label(text="Output path (relative):")
         col.row().prop(props, "render_path", text='')
 
 
