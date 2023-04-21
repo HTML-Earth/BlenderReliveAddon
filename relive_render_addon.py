@@ -223,9 +223,7 @@ class ReliveImportReferencesOperator(bpy.types.Operator):
 
         print("Importing reference sprites...")
         
-        relative_string = ""
         if props.use_relative_ref_sprite_path:
-            relative_string = "//"
             if ":" in props.ref_sprite_path:
                 self.report({"ERROR"}, "Relative sprite paths cannot start with a drive letter")
                 return {"CANCELLED"}
