@@ -4,7 +4,7 @@ bl_info = {
     'blender': (3, 0, 0),
     'category': 'Render',
     # optional
-    'version': (0, 9, 6),
+    'version': (0, 9, 7),
     'author': 'HTML_Earth',
     'description': 'A tool to render HD sprites for RELIVE',
 }
@@ -36,6 +36,9 @@ msg_cancelling = 'CANCELLING...'
 msg_cancelled = 'CANCELLED'
 msg_check_settings = 'CHECK SETTINGS'
 error_path = 'PATH ERROR. Do not open the file from within Blender. Start Blender by opening the file directly.'
+error_relative_path_with_drive_letter = "Relative sprite paths cannot start with a drive letter"
+error_absolute_path_without_drive_letter = "Absolute sprite paths should start with a drive letter (e.g. 'C:')"
+relative_path_description = "The path will be treated as relative path from the blend file location\nIf disabled, you need to specify the full path, including the drive letter\n(All this really does is add '//' to the beginning of the path)\n(Add '../' to a relative path to go up one folder)"
 
 default_pass_name = "_DEFAULT"
 emissive_pass_name = "_emissive"
@@ -77,9 +80,10 @@ class ReliveBatchProperties(bpy.types.PropertyGroup):
     )
 
     # FILE PATHS
-    render_path : bpy.props.StringProperty(name='Render Path', default='renders', description="Renders will be saved to this path\nDue to technical limitations, this path has to be relative to the .blend file (Add '../' to the path to go up one folder)\nWith multiple viewlayers selected, extra folders named after each model will be between this path and the sprite folders")
+    render_path : bpy.props.StringProperty(name='Render Path', default='renders', description="Renders will be saved to this path\nWith multiple viewlayers selected, extra folders named after each model will be between this path and the sprite folders")
+    use_relative_render_path : bpy.props.BoolProperty(name='Use Relative Render Path', default=True, description=relative_path_description)
     ref_sprite_path : bpy.props.StringProperty(name='Reference Sprites Path', default='sprites', description="Sprites will be loaded from this path\nWhen rendering animations, this path will also be used to check which animations exist, and their data (meta.json)")
-    use_relative_ref_sprite_path : bpy.props.BoolProperty(name='Use Relative Reference Sprites Path', default=True, description="The sprite path will be treated as relative path from the blend file location\nIf disabled, you need to specify the full path, including the drive letter\n(All this really does is add '//' to the beginning of the path)")
+    use_relative_ref_sprite_path : bpy.props.BoolProperty(name='Use Relative Reference Sprites Path', default=True, description=relative_path_description)
     
     # Filters
     ref_sprite_filter : bpy.props.StringProperty(name='Reference Sprite filter', default='Mudokon*', description="Only animations that match the filter will be imported")
@@ -225,11 +229,11 @@ class ReliveImportReferencesOperator(bpy.types.Operator):
         
         if props.use_relative_ref_sprite_path:
             if ":" in props.ref_sprite_path:
-                self.report({"ERROR"}, "Relative sprite paths cannot start with a drive letter")
+                self.report({"ERROR"}, error_relative_path_with_drive_letter)
                 return {"CANCELLED"}
         else:
             if ":" not in props.ref_sprite_path:
-                self.report({"ERROR"}, "Absolute sprite paths should start with a drive letter (e.g. 'C:')")
+                self.report({"ERROR"}, error_absolute_path_without_drive_letter)
                 return {"CANCELLED"}
 
         try:
@@ -370,6 +374,15 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
 
         # save old action
         self.previous_action = context.scene.objects[props.rig_name].animation_data.action
+        
+        # Set current pass (and make sure it starts with '_')
+        props.current_pass = props.pass_to_use if props.pass_to_use != "" else default_pass_name
+        if not props.current_pass.startswith('_'):
+            props.current_pass = '_' + props.current_pass
+
+        # Set BG to transparent if pass is not emissive
+        self.previous_bg_transparent = context.scene.render.film_transparent
+        context.scene.render.film_transparent = not props.current_pass.endswith(emissive_pass_name)
 
         # get list of models to render
         models = get_models(context.scene.view_layers, props.enabled_view_layers)
@@ -380,6 +393,18 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
             self.finished("SELECT A MODEL!")
             return {"CANCELLED"}
         
+        # cancel if render path is wrong
+        if props.use_relative_render_path:
+            if ":" in props.render_path:
+                self.report({"ERROR"}, error_relative_path_with_drive_letter)
+                self.finished(error_relative_path_with_drive_letter)
+                return {"CANCELLED"}
+        else:
+            if ":" not in props.render_path:
+                self.report({"ERROR"}, error_absolute_path_without_drive_letter)
+                self.finished(error_absolute_path_without_drive_letter)
+                return {"CANCELLED"}
+
         try:
             # Get animation list using sprite folder
             animations = get_anims(props.ref_sprite_path, props.animation_filter)
@@ -387,15 +412,6 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
             self.report({"ERROR"}, error_path)
             self.finished(error_path)
             return {"CANCELLED"}
-
-        # Set current pass (and make sure it starts with '_')
-        props.current_pass = props.pass_to_use if props.pass_to_use != "" else default_pass_name
-        if not props.current_pass.startswith('_'):
-            props.current_pass = '_' + props.current_pass
-
-        # Set BG to transparent if pass is not emissive
-        self.previous_bg_transparent = context.scene.render.film_transparent
-        context.scene.render.film_transparent = not props.current_pass.endswith(emissive_pass_name)
         
         if props.current_pass.endswith(emissive_pass_name):
             try:
@@ -505,7 +521,10 @@ class ReliveBatchRenderOperator(bpy.types.Operator):
                 bpy.data.objects[props.camera_name].data.shift_y     = camera_settings.offset_y
 
                 # Set file path
-                sc.render.filepath = '//{}'.format(Path(render_anim.file_path))
+                relative_string = ""
+                if props.use_relative_render_path:
+                    relative_string = "//"
+                sc.render.filepath = '{}{}'.format(relative_string, Path(render_anim.file_path))
 
                 # Render frame
                 bpy.ops.render.render(animation=True, write_still=False, layer=render_anim.model)
@@ -745,7 +764,7 @@ class ReliveBatchRendererReferencesPanel(ReliveBatchRendererPanel, bpy.types.Pan
         props = context.scene.reliveBatch
         col = self.layout.column()
 
-        col.row().label(text='Filter:')
+        col.row().label(text='Animation name filter:')
         col.row().prop(props, "ref_sprite_filter", text='')
 
         col.row().operator('opr.import_reference_sprites_operator', text='IMPORT SPRITES')
@@ -760,11 +779,12 @@ class ReliveBatchRendererRenderPanel(ReliveBatchRendererPanel, bpy.types.Panel):
 
         col = self.layout.column()
         
-        col.row().label(text='Filter:')
+        col.row().label(text='Animation name filter:')
         col.row().prop(props, "animation_filter", text='')
 
-        col.label(text="Output path (relative):")
+        col.label(text="Output path:")
         col.row().prop(props, "render_path", text='')
+        col.row().prop(props, "use_relative_render_path", text="Use relative path")
 
 
         # Infobox
@@ -797,7 +817,7 @@ class ReliveBatchRendererRenderPanel(ReliveBatchRendererPanel, bpy.types.Panel):
 class ReliveBatchRendererModelsPanel(ReliveBatchRendererPanel, bpy.types.Panel):
     bl_idname = "VIEW3D_PT_batch_renderer_models"
     bl_parent_id = "VIEW3D_PT_batch_renderer"
-    bl_label = "Settings (Render)"
+    bl_label = "Render Settings"
 
     def draw(self, context):
         props = context.scene.reliveBatch
